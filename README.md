@@ -26,6 +26,12 @@ Open **http://localhost:3000/dashboard**. You'll see the demo business
 "Demo Marine Repair" with stat cards, a callback queue (three seeded missed calls),
 and a recent-calls table mixing answered and missed.
 
+> If you ever run `npm run build` in this checkout and then `npm run dev`, the dev
+> compiler can collide with the leftover production bundles in `.next` and throw
+> `__webpack_modules__[moduleId] is not a function`. Use **`npm run dev:clean`**
+> (wipes `.next` first) or **`npm run clean`** to clear it. The mock demo only ever
+> needs `npm run dev`, so this won't happen unless you also build.
+
 `npm run dev` reads `.env.local`, which ships with `MOCK_MODE=true`. If you don't
 have that file, create it (or copy `.env.example` to `.env.local`) with one line:
 
