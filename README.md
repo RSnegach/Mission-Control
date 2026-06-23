@@ -11,6 +11,66 @@ This repo is the **MVP 1 spine**: incoming webhook → log call → forward → 
 → missed-call request → dashboard. It is built production-shaped, not throwaway. Adding
 a real customer later means inserting a business row and assigning a number, not a rewrite.
 
+## Run locally in mock mode (no Supabase, no Twilio)
+
+`MOCK_MODE=true` runs the whole app on in-memory sample data. No accounts, no
+credentials, no external services. `/dashboard` loads seeded calls and callbacks,
+and the Twilio webhooks work against the in-memory store.
+
+```bash
+npm install
+npm run dev            # MOCK_MODE=true is already set in .env.local
+```
+
+Open **http://localhost:3000/dashboard**. You'll see the demo business
+"Demo Marine Repair" with stat cards, a callback queue (three seeded missed calls),
+and a recent-calls table mixing answered and missed.
+
+`npm run dev` reads `.env.local`, which ships with `MOCK_MODE=true`. If you don't
+have that file, create it (or copy `.env.example` to `.env.local`) with one line:
+
+```
+MOCK_MODE=true
+```
+
+### Exercise the webhooks without a phone
+
+The webhooks are plain POST endpoints. Drive them with curl while `npm run dev` runs:
+
+```bash
+# Incoming call -> logs it, returns Dial TwiML
+curl -X POST http://localhost:3000/api/twilio/voice/incoming \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "To=+13215550100&From=+14075551234&CallSid=CA_demo_test_1"
+
+# No-answer result -> marks the call missed, creates a callback request
+curl -X POST http://localhost:3000/api/twilio/voice/dial-result \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "CallSid=CA_demo_test_1&DialCallStatus=no-answer"
+```
+
+Reload `/dashboard`: the new caller appears in recent calls as **Missed** and a new
+**Missed call callback** is in the queue. `DialCallStatus=completed&DialCallDuration=42`
+instead marks it **Answered** with a 0:42 duration.
+
+Mock state lives in memory for the dev process. It survives hot-reload but resets when
+you restart `npm run dev`. The seeded number to call is `+13215550100`.
+
+## How mock vs real is wired
+
+The app never talks to Supabase directly. It talks to a `DataBackend` adapter
+(`src/lib/backend.ts`), and `getBackend()` picks the implementation from `MOCK_MODE`:
+
+- `MockBackend` (`src/lib/mock-backend.ts`) — in-memory seeded store.
+- `SupabaseBackend` (`src/lib/supabase-backend.ts`) — real Postgres, unchanged logic.
+
+The Twilio webhooks and the dashboard import from `src/lib/data.ts`, a thin facade
+over the active backend, so flipping to real infrastructure is a config change, not a
+code change. Twilio signature validation is also auto-skipped in mock mode.
+
+To switch to real services later: set `MOCK_MODE=false` (or remove it) and fill in the
+Supabase and Twilio vars below.
+
 ## Stack
 
 - **Next.js (App Router), full-stack.** API routes handle Twilio webhooks; server
@@ -29,8 +89,11 @@ src/
       incoming/route.ts                   POST: log call, return Dial TwiML
       dial-result/route.ts                POST: update status, create missed request
   lib/
+    backend.ts                            DataBackend interface + getBackend() selector
+    mock-backend.ts                       in-memory seeded backend (MOCK_MODE=true)
+    supabase-backend.ts                   real Postgres backend (MOCK_MODE=false)
+    data.ts                               facade: delegates to the active backend
     supabase.ts                           server-only admin client
-    data.ts                               tenant/contact/call/request helpers
     twilio.ts                             signature validation, TwiML builders
     phone.ts                              E.164 normalization
     format.ts                             dashboard formatting
@@ -41,7 +104,12 @@ supabase/
 .env.example
 ```
 
-## 1. Database setup (Supabase)
+## Going live with real services
+
+Everything below applies only when you turn off mock mode (`MOCK_MODE=false`). Skip
+it entirely while you're running the local mock demo above.
+
+### 1. Database setup (Supabase)
 
 1. Create a project at supabase.com. Free tier is fine for the demo.
 2. Open the SQL editor and run `supabase/migrations/0001_init.sql`.
@@ -49,7 +117,7 @@ supabase/
    (E.164, e.g. `+13215550100`) and `business_settings.default_route_phone` to the
    phone you want calls forwarded to (your cell for the demo). Run it.
 
-## 2. Environment variables
+### 2. Environment variables
 
 Copy `.env.example` to `.env.local` and fill in:
 
@@ -63,11 +131,12 @@ Copy `.env.example` to `.env.local` and fill in:
 | `APP_BASE_URL` | your public HTTPS URL (ngrok in dev, no trailing slash) |
 | `TWILIO_VALIDATE_SIGNATURE` | `false` for first local tests, `true` before production |
 
+Set `MOCK_MODE=false` so the app uses these instead of the in-memory store.
 `APP_BASE_URL` must exactly match the webhook URL you set in Twilio, including
 `https` and no trailing slash. Signature validation hashes that URL, so a mismatch
 makes valid requests fail once validation is on.
 
-## 3. Run locally
+### 3. Run locally
 
 ```bash
 npm install
@@ -76,7 +145,7 @@ npm run dev          # http://localhost:3000
 
 Visit `/dashboard`. With the seed loaded it shows the demo business and empty tables.
 
-## 4. Expose to Twilio with ngrok
+### 4. Expose to Twilio with ngrok
 
 Twilio must reach your machine over public HTTPS.
 
@@ -87,7 +156,7 @@ ngrok http 3000
 Copy the `https://....ngrok-free.app` URL into `.env.local` as `APP_BASE_URL`, then
 restart `npm run dev`.
 
-## 5. Twilio console configuration
+### 5. Twilio console configuration
 
 1. Buy a number (or use a trial number) with Voice enabled.
 2. Phone Numbers → your number → Voice Configuration.
@@ -98,7 +167,7 @@ restart `npm run dev`.
 On a Twilio trial account you can only forward to verified numbers, and calls open
 with a trial notice. Both are fine for the demo.
 
-## 6. MVP 1 success test
+### 6. MVP 1 success test
 
 1. Call your Twilio number from another phone.
 2. It greets you and rings the route phone.

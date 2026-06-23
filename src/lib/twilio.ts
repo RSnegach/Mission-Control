@@ -34,11 +34,16 @@ export function publicUrlFor(req: Request): string {
  * Validate the inbound webhook signature.
  * Returns true when valid OR when validation is disabled via env (early local
  * testing). Set TWILIO_VALIDATE_SIGNATURE=true before production.
+ *
+ * In MOCK_MODE there are no Twilio credentials and requests come from curl/tests,
+ * so validation is always skipped regardless of TWILIO_VALIDATE_SIGNATURE.
  */
 export function validateTwilioSignature(
   req: Request,
   params: Record<string, string>,
 ): boolean {
+  if (process.env.MOCK_MODE === "true") return true;
+
   const enabled = process.env.TWILIO_VALIDATE_SIGNATURE === "true";
   if (!enabled) {
     // TODO: enforce in production. Tracked in README production hardening.
