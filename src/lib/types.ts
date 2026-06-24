@@ -19,6 +19,8 @@ export interface BusinessSettings {
   after_hours_behavior: string | null;
   dial_timeout_seconds: number;
   callback_sla_minutes: number | null;
+  sms_followup_enabled: boolean;
+  sms_followup_template: string | null;
   created_at: string;
   updated_at: string;
 }

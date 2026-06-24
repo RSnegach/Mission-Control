@@ -55,6 +55,9 @@ function seed(): MockStore {
     after_hours_behavior: "voicemail",
     dial_timeout_seconds: 20,
     callback_sla_minutes: 60,
+    sms_followup_enabled: true,
+    sms_followup_template:
+      "Hi {name}, this is {business}. Sorry we missed your call. Reply here and we'll help you out.",
     created_at: now,
     updated_at: now,
   };
@@ -427,5 +430,51 @@ export class MockBackend implements DataBackend {
       .requests.filter((r) => r.business_id === businessId && r.contact_id === contactId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .slice(0, limit);
+  }
+
+  // --- Writes ---
+  async updateSettings(
+    businessId: string,
+    patch: Partial<
+      Pick<
+        BusinessSettings,
+        "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+      >
+    >,
+  ): Promise<BusinessSettings | null> {
+    const s = store();
+    const row = s.settings.find((x) => x.business_id === businessId);
+    if (!row) return null;
+    Object.assign(row, patch, { updated_at: new Date().toISOString() });
+    return row;
+  }
+
+  async createOutboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+  }): Promise<Message> {
+    const s = store();
+    const msg: Message = {
+      id: nextId(s, "msg"),
+      business_id: params.businessId,
+      contact_id: params.contactId,
+      request_id: params.requestId,
+      twilio_message_sid: params.twilioMessageSid ?? null,
+      direction: "outbound",
+      from_number: params.fromNumber,
+      to_number: params.toNumber,
+      body: params.body,
+      status: params.status ?? "sent",
+      media_urls: null,
+      created_at: new Date().toISOString(),
+    };
+    s.messages.push(msg);
+    return msg;
   }
 }

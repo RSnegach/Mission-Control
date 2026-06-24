@@ -8,6 +8,25 @@ import twilio from "twilio";
  * compares against the X-Twilio-Signature header (brief sections 20, 26).
  */
 
+/**
+ * Lazy, server-only Twilio REST client for outbound sends (SMS, calls).
+ * Constructed on first use so mock mode never needs Twilio credentials.
+ * Only the !isMockMode() path calls this.
+ */
+let restClient: ReturnType<typeof twilio> | null = null;
+export function getTwilioClient(): ReturnType<typeof twilio> {
+  if (restClient) return restClient;
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token) {
+    throw new Error(
+      "Missing Twilio credentials: TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required to send.",
+    );
+  }
+  restClient = twilio(sid, token);
+  return restClient;
+}
+
 /** Parse the urlencoded body into a flat string map. */
 export async function readTwilioForm(req: Request): Promise<Record<string, string>> {
   const form = await req.formData();

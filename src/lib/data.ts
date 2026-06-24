@@ -124,3 +124,29 @@ export function listRequestsByContact(
 ): Promise<CallRequest[]> {
   return getBackend().listRequestsByContact(businessId, contactId, limit);
 }
+
+// --- Writes ---
+export function updateSettings(
+  businessId: string,
+  patch: Partial<
+    Pick<
+      BusinessSettings,
+      "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+    >
+  >,
+): Promise<BusinessSettings | null> {
+  return getBackend().updateSettings(businessId, patch);
+}
+
+export function createOutboundMessage(params: {
+  businessId: string;
+  contactId: string | null;
+  requestId: string | null;
+  fromNumber: string;
+  toNumber: string;
+  body: string;
+  status?: string;
+  twilioMessageSid?: string | null;
+}): Promise<Message> {
+  return getBackend().createOutboundMessage(params);
+}

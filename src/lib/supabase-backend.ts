@@ -409,4 +409,57 @@ export class SupabaseBackend implements DataBackend {
     if (error) throw error;
     return (data as Call) ?? null;
   }
+
+  // --- Writes ---
+  async updateSettings(
+    businessId: string,
+    patch: Partial<
+      Pick<
+        BusinessSettings,
+        "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+      >
+    >,
+  ): Promise<BusinessSettings | null> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("business_settings")
+      .update(patch)
+      .eq("business_id", businessId)
+      .select("*")
+      .maybeSingle();
+    if (error) throw error;
+    return (data as BusinessSettings) ?? null;
+  }
+
+  async createOutboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+  }): Promise<Message> {
+    // Requires the `messages` table (real-mode follow-on migration).
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("messages")
+      .insert({
+        business_id: params.businessId,
+        contact_id: params.contactId,
+        request_id: params.requestId,
+        twilio_message_sid: params.twilioMessageSid ?? null,
+        direction: "outbound",
+        from_number: params.fromNumber,
+        to_number: params.toNumber,
+        body: params.body,
+        status: params.status ?? "sent",
+        media_urls: null,
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data as Message;
+  }
 }

@@ -56,6 +56,27 @@ export interface DataBackend {
   // --- Per-contact history ---
   listCallsByContact(businessId: string, contactId: string, limit?: number): Promise<Call[]>;
   listRequestsByContact(businessId: string, contactId: string, limit?: number): Promise<CallRequest[]>;
+
+  // --- Writes ---
+  updateSettings(
+    businessId: string,
+    patch: Partial<
+      Pick<
+        BusinessSettings,
+        "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+      >
+    >,
+  ): Promise<BusinessSettings | null>;
+  createOutboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+  }): Promise<Message>;
 }
 
 /** True when the app should run entirely on mock data, with no Supabase/Twilio. */

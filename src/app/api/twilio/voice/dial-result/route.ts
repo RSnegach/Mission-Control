@@ -4,7 +4,10 @@ import {
   updateCallBySid,
   createMissedCallRequest,
   recordCallEvent,
+  getSettings,
+  findBusinessByTwilioNumber,
 } from "@/lib/data";
+import { sendMissedCallFollowup } from "@/lib/followup";
 import type { Call } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -70,7 +73,23 @@ export async function POST(req: Request) {
       await updateCallBySid(callSid, patch);
 
       if (missed) {
-        await createMissedCallRequest(call);
+        const request = await createMissedCallRequest(call);
+        if (request) {
+          // Link the request id onto the call so the follow-up can attach the
+          // message to it and dedup across Twilio retries.
+          call.created_request_id = request.id;
+          // Send the editable SMS follow-up. Isolated so a send failure never
+          // breaks the TwiML response (the caller still hears the hangup line).
+          try {
+            const business = await findBusinessByTwilioNumber(call.to_number ?? "");
+            if (business) {
+              const settings = await getSettings(call.business_id);
+              await sendMissedCallFollowup(call, business, settings);
+            }
+          } catch (e) {
+            console.error("[twilio/dial-result] follow-up send failed", e);
+          }
+        }
       }
     }
 
