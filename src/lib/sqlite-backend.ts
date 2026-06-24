@@ -659,18 +659,28 @@ function seedIfEmpty(db: SqliteDB): void {
     { id: "con_3", name: null, phone: "+14075558831" },
     { id: "con_4", name: null, phone: "+13215550199" },
   ];
-  const NAMES = [
-    "Coastal Charters", "Reef Runners", "Marina Bay Rentals", "Blue Water Tours",
-    "Harbor Freight Co", "Tideline Fishing", "Anchor Down LLC", "Gulfstream Yachts",
+  // Distinct, real-sounding names (no numeric suffixes); a few left unknown.
+  const EXTRA_NAMES: (string | null)[] = [
+    "Coastal Charters",
+    "Reef Runners Dive Co",
+    "Marina Bay Rentals",
+    "Blue Water Tours",
+    "Captain Dave Hollis",
+    null,
+    "Tideline Fishing",
+    "Anchor Down Yacht Club",
+    "Maria Vasquez",
+    "Gulfstream Charters",
+    null,
+    "Sandbar Grill",
   ];
-  for (let i = 0; i < SEED.extraContacts; i++) {
-    const named = chance(0.5);
+  EXTRA_NAMES.forEach((name, i) => {
     contacts.push({
       id: `con_seed_${i}`,
-      name: named ? `${pick(NAMES)} ${i}` : null,
+      name,
       phone: `+1407556${String(2000 + i).padStart(4, "0")}`,
     });
-  }
+  });
   // Returning callers: the first ~60% get picked more often.
   const returningPool = contacts.slice(0, Math.ceil(contacts.length * 0.6));
 
@@ -769,72 +779,7 @@ function seedIfEmpty(db: SqliteDB): void {
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, ?)`,
     );
 
-    // Unique-message generators so the seeded inbox never repeats a body.
-    const usedBodies = new Set<string>();
-    const unique = (candidates: () => string): string => {
-      for (let i = 0; i < 60; i++) {
-        const b = candidates();
-        if (!usedBodies.has(b)) {
-          usedBodies.add(b);
-          return b;
-        }
-      }
-      // Exhausted the obvious combinations; force uniqueness.
-      const b = `${candidates()} (#${usedBodies.size + 1})`;
-      usedBodies.add(b);
-      return b;
-    };
-
-    // Inbound replies: opener + marine-repair topic + closer, large combinatorial space.
-    const IN_OPEN = ["Hi, ", "Hey, ", "Morning, ", "Hello, ", "Quick one, ", ""];
-    const IN_TOPIC = [
-      "the inboard is overheating after about ten minutes",
-      "I need a quote to winterize two outboards",
-      "the bilge pump keeps cycling on and off",
-      "my trim tabs stopped responding",
-      "looking to schedule annual engine service",
-      "there's a fuel smell in the cabin",
-      "the lower unit is leaking gear oil",
-      "need new zincs and a hull inspection",
-      "the chartplotter won't hold a GPS fix",
-      "starboard engine is hard to start when cold",
-      "want an estimate on gelcoat repair",
-      "the shore power keeps tripping the breaker",
-      "props are dinged up and need reconditioning",
-      "the steering feels stiff at the helm",
-      "AC raw water pump seems weak",
-      "need a haul-out and bottom paint quote",
-      "batteries aren't holding a charge overnight",
-      "the head is clogged again",
-      "VHF radio has no transmit power",
-      "want to book a pre-purchase survey",
-      "the trailer bearings are running hot",
-      "engine alarm went off near the inlet",
-      "need a generator impeller replaced",
-      "the canvas needs restitching before season",
-      "looking for repower options on a 2008 cruiser",
-    ];
-    const IN_CLOSE = [
-      ". Can someone call me back?",
-      ". When can you take a look?",
-      ". What would that run?",
-      ". Are you open this weekend?",
-      ". No rush, just need an idea on timing.",
-      ". Trying to get out on the water this week.",
-      ".",
-    ];
-    const replyBody = () =>
-      unique(() => {
-        const s = pick(IN_OPEN) + pick(IN_TOPIC) + pick(IN_CLOSE);
-        return s.charAt(0).toUpperCase() + s.slice(1);
-      });
-
-    // Outbound follow-up: the live product sends one fixed template, so seeded
-    // outbound bodies legitimately share wording. Not deduped (would force ugly
-    // suffixes); only the inbound replies above are kept unique.
-    const outboundBody = (name: string) =>
-      `Hi ${name}, this is Demo Marine Repair. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.`;
-
+    // First write every call + its missed-call request.
     for (const c of calls) {
       const startedIso = c.startedAt.toISOString();
       const status = c.missed ? "missed" : "answered";
@@ -848,36 +793,75 @@ function seedIfEmpty(db: SqliteDB): void {
       );
 
       if (c.missed && c.requestId) {
-        // Older requests are closed; recent ones stay open.
         const ageDays = (Date.now() - c.startedAt.getTime()) / dayMs;
         const reqStatus = ageDays > 7 ? "closed" : "needs_callback";
         const dueIso = new Date(c.startedAt.getTime() + 60 * 60_000).toISOString();
         insReq.run(c.requestId, businessId, c.contact.id, c.id, reqStatus, dueIso, startedIso, startedIso);
-
-        const ageDaysForMsg = (Date.now() - c.startedAt.getTime()) / dayMs;
-        if (ageDaysForMsg <= SEED.messageWindowDays && chance(SEED.followupRate)) {
-          const outMs = c.startedAt.getTime() + 60_000;
-          const name = c.contact.name?.split(" ")[0] ?? "there";
-          insMsg.run(
-            newId("msg"), businessId, c.contact.id, c.requestId, `SM_seed_${c.id}`,
-            "outbound", tn, c.contact.phone,
-            outboundBody(name),
-            "delivered", new Date(outMs).toISOString(),
-          );
-          if (chance(SEED.replyRate)) {
-            const replies = randInt(1, 2);
-            for (let r = 0; r < replies; r++) {
-              const inMs = outMs + (r + 1) * randInt(2, 30) * 60_000;
-              insMsg.run(
-                newId("msg"), businessId, c.contact.id, c.requestId, null,
-                "inbound", c.contact.phone, tn, replyBody(), "received",
-                new Date(inMs).toISOString(),
-              );
-            }
-          }
-        }
       }
     }
+
+    // Curated SMS conversations. Each is ONE coherent exchange about a single
+    // issue, attached to the contact's most recent missed call, so every thread
+    // in the inbox reads naturally (no stacked auto-replies, no mismatched
+    // replies). The product sends one fixed follow-up template, so the outbound
+    // line is identical across threads, which is correct; the inbound replies are
+    // all distinct and on-topic.
+    const followup = (name: string) =>
+      `Hi ${name}, this is Demo Marine Repair. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.`;
+
+    // Templates of believable customer replies, one issue per conversation.
+    // [contactIndex is assigned by order to recent missed callers]
+    const CONVERSATIONS: { replies: string[] }[] = [
+      { replies: ["My inboard is overheating after about ten minutes on plane. Can someone take a look this week?", "It's a 2019 Sea Ray 320. I'm at the Cocoa Beach marina."] },
+      { replies: ["Looking for a quote to winterize two outboards before the season ends."] },
+      { replies: ["The bilge pump keeps cycling on and off even when the boat is dry.", "Happy to bring it in whenever you have an opening."] },
+      { replies: ["Trim tabs stopped responding on the starboard side. What would a repair run?"] },
+      { replies: ["Need to schedule annual engine service. When's your earliest?", "Great, mornings work best for me."] },
+      { replies: ["Smelling fuel in the cabin after the last trip. Want it checked before we go out again."] },
+      { replies: ["Lower unit is leaking gear oil. Are you open this weekend?"] },
+      { replies: ["Want a haul-out and bottom paint quote for a 28 foot cruiser."] },
+      { replies: ["Chartplotter won't hold a GPS fix anymore. Could be the antenna?", "It's a Garmin, maybe four years old."] },
+      { replies: ["Booking a pre-purchase survey on a boat I'm looking at. Do you do those?"] },
+      { replies: ["Batteries aren't holding a charge overnight. Probably need a new bank."] },
+      { replies: ["Props are dinged up and need reconditioning before the tournament."] },
+    ];
+
+    // Most recent missed call per contact, within the message window.
+    const recentMissedByContact = new Map<string, GenCall>();
+    const cutoff = Date.now() - SEED.messageWindowDays * dayMs;
+    for (const c of calls) {
+      if (!c.missed || !c.requestId) continue;
+      if (c.startedAt.getTime() < cutoff) continue;
+      const prev = recentMissedByContact.get(c.contact.id);
+      if (!prev || c.startedAt.getTime() > prev.startedAt.getTime()) {
+        recentMissedByContact.set(c.contact.id, c);
+      }
+    }
+
+    // Attach one curated conversation to each such contact, newest callers first,
+    // so the demo inbox shows a handful of clean, distinct threads.
+    const targets = [...recentMissedByContact.values()]
+      .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+      .slice(0, CONVERSATIONS.length);
+
+    targets.forEach((c, i) => {
+      const convo = CONVERSATIONS[i];
+      const name = c.contact.name?.split(" ")[0] ?? "there";
+      const outMs = c.startedAt.getTime() + 60_000;
+      insMsg.run(
+        newId("msg"), businessId, c.contact.id, c.requestId, `SM_seed_${c.id}`,
+        "outbound", tn, c.contact.phone, followup(name), "delivered",
+        new Date(outMs).toISOString(),
+      );
+      convo.replies.forEach((body, r) => {
+        const inMs = outMs + (r + 1) * randInt(3, 18) * 60_000;
+        insMsg.run(
+          newId("msg"), businessId, c.contact.id, c.requestId, null,
+          "inbound", c.contact.phone, tn, body, "received",
+          new Date(inMs).toISOString(),
+        );
+      });
+    });
 
     tx.exec("COMMIT");
   } catch (e) {
