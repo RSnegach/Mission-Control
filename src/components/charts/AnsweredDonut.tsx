@@ -17,7 +17,7 @@ export default function AnsweredDonut({
   if (total === 0) {
     return (
       <div style={{ height: 220, display: "grid", placeItems: "center", color: colors.muted, fontSize: 13 }}>
-        No calls today yet.
+        No calls in range.
       </div>
     );
   }
@@ -56,7 +56,7 @@ export default function AnsweredDonut({
       >
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 24, fontWeight: 700, color: colors.foregroundStrong }}>{total}</div>
-          <div style={{ fontSize: 11, color: colors.muted }}>calls today</div>
+          <div style={{ fontSize: 11, color: colors.muted }}>total calls</div>
         </div>
       </div>
       {/* Legend */}

@@ -10,25 +10,25 @@ import {
   type MetricKey,
   type TimeRange,
 } from "@/lib/analytics";
-import { TimeRangeControls } from "./charts/TimeRangeControls";
 import TrendChart from "./charts/TrendChart";
 import { colors } from "./ui";
 
 /**
- * Interactive trends panel: pick a time range and overlay any combination of
- * metrics on one chart. Series are computed client-side from the raw per-business
- * arrays the server passed in, so range/metric changes are instant.
+ * Trends overlay: pick any combination of metrics to plot on one chart. The time
+ * range is controlled by the parent dashboard (shared across the whole page), so
+ * this only owns which metrics are checked.
  */
 export function AnalyticsPanel({
   calls,
   messages,
   timezone,
+  range,
 }: {
   calls: Call[];
   messages: Message[];
   timezone: string;
+  range: TimeRange;
 }) {
-  const [range, setRange] = useState<TimeRange>({ preset: "month" });
   const [checked, setChecked] = useState<Set<MetricKey>>(new Set(DEFAULT_METRICS));
 
   const selected = useMemo(
@@ -52,10 +52,6 @@ export function AnalyticsPanel({
 
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
-        <TimeRangeControls range={range} onChange={setRange} />
-      </div>
-
       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", marginBottom: 14 }}>
         {METRICS.map((m) => {
           const on = checked.has(m.key);

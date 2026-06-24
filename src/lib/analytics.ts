@@ -33,11 +33,15 @@ export function isToday(iso: string, tz: string): boolean {
   return dayKey(iso, tz) === dayKey(new Date().toISOString(), tz);
 }
 
-/** Calls per hour for today, 24 buckets labeled 12a..11p. */
+/**
+ * Calls per hour-of-day, 24 buckets labeled 12a..11p. Buckets every call passed
+ * in; the caller pre-filters to the desired range (so over a multi-day range this
+ * is a peak-hours histogram aggregated across days).
+ */
 export function callsByHour(calls: Call[], tz: string): { label: string; value: number }[] {
   const buckets = new Array(24).fill(0);
   for (const c of calls) {
-    if (!c.created_at || !isToday(c.created_at, tz)) continue;
+    if (!c.created_at) continue;
     buckets[hourOf(c.created_at, tz)] += 1;
   }
   return buckets.map((value, h) => ({ label: hourLabel(h), value }));
@@ -65,15 +69,17 @@ export function callsByDay(
   return out.map(({ label, value }) => ({ label, value }));
 }
 
-/** Answered vs missed counts for today, with chart colors. */
+/**
+ * Answered vs missed counts with chart colors. Counts every call passed in; the
+ * caller pre-filters to the desired range. tz kept for signature stability.
+ */
 export function answeredVsMissed(
   calls: Call[],
-  tz: string,
+  _tz: string,
 ): { name: string; value: number; color: string }[] {
   let answered = 0;
   let missed = 0;
   for (const c of calls) {
-    if (!c.created_at || !isToday(c.created_at, tz)) continue;
     if (c.status === "answered") answered += 1;
     else if (c.status === "missed") missed += 1;
   }
@@ -213,6 +219,12 @@ export function resolveRange(range: TimeRange, tz: string, now = Date.now()): Re
   }
 
   return { startMs, endMs, bucket, buckets };
+}
+
+/** True when an ISO timestamp falls within a resolved range's span. */
+export function inResolvedRange(iso: string, r: ResolvedRange): boolean {
+  const t = new Date(iso).getTime();
+  return t >= r.startMs && t <= r.endMs;
 }
 
 /** Index of the bucket an ISO timestamp falls into, or -1 if outside. */
