@@ -1,7 +1,8 @@
 "use client";
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { colors, hex } from "../ui";
+import { useTheme } from "../ThemeProvider";
+import { colors } from "../ui";
 import { tooltipProps } from "./tooltip";
 
 /** Answered vs missed donut. data: [{ name, value, color }] */
@@ -10,6 +11,7 @@ export default function AnsweredDonut({
 }: {
   data: { name: string; value: number; color: string }[];
 }) {
+  const { palette: p } = useTheme();
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
   if (total === 0) {
@@ -24,7 +26,7 @@ export default function AnsweredDonut({
     <div style={{ position: "relative" }}>
       <ResponsiveContainer width="100%" height={220}>
         <PieChart>
-          <Tooltip {...tooltipProps} />
+          <Tooltip {...tooltipProps(p)} />
           <Pie
             data={data}
             dataKey="value"
@@ -32,8 +34,9 @@ export default function AnsweredDonut({
             innerRadius={58}
             outerRadius={88}
             paddingAngle={2}
-            stroke={hex.background}
+            stroke={p.card}
             strokeWidth={2}
+            isAnimationActive={false}
           >
             {data.map((d) => (
               <Cell key={d.name} fill={d.color} />
@@ -52,7 +55,7 @@ export default function AnsweredDonut({
         }}
       >
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{total}</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: colors.foregroundStrong }}>{total}</div>
           <div style={{ fontSize: 11, color: colors.muted }}>calls today</div>
         </div>
       </div>

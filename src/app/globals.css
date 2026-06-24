@@ -1,17 +1,105 @@
 @import "tailwindcss";
 
+/*
+ * Theme tokens. Default (:root) is dark. [data-theme="light"] overrides.
+ * The theme attribute is set on <html> by an inline script before paint
+ * (see layout.tsx) to avoid a flash, and toggled at runtime by ThemeProvider.
+ * Existing variable names are preserved so all components keep working.
+ */
 :root {
-  --background: #0b0e14;
-  --foreground: #e6e9ef;
-  --muted: #9aa4b2;
-  --card: #141925;
-  --border: #232a3a;
-  --accent: #3b82f6;
+  --background: #0d1017;
+  --surface: #141821;
+  --card: #151a24;
+  --card-hover: #1b212d;
+  --border: #242b38;
+  --border-strong: #303949;
+  --foreground: #e8ebf1;
+  --foreground-strong: #f6f8fb;
+  --muted: #8a93a6;
+  --muted-strong: #aab2c2;
+  --accent: #4f7dff;
+  --accent-hover: #6a91ff;
+  --accent-contrast: #ffffff;
+  --success: #34d399;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --radius: 12px;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --background: #f5f7fa;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f3f5f9;
+  --border: #e4e8ef;
+  --border-strong: #d3d9e3;
+  --foreground: #1b2230;
+  --foreground-strong: #0d1320;
+  --muted: #5d6675;
+  --muted-strong: #404a5a;
+  --accent: #2f6fed;
+  --accent-hover: #1f5fdc;
+  --accent-contrast: #ffffff;
+  --success: #15a06a;
+  --danger: #dc4c4c;
+  --warning: #b9821a;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 18px rgba(16, 24, 40, 0.08);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.08);
+  --radius: 12px;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 html,
 body {
+  margin: 0;
+  padding: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Smooth the transition when switching themes. */
+html {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--foreground-strong);
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--accent);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Tasteful scrollbars in dark mode. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 2px solid var(--background);
 }

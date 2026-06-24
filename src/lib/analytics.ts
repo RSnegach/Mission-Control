@@ -78,8 +78,8 @@ export function answeredVsMissed(
     else if (c.status === "missed") missed += 1;
   }
   return [
-    { name: "Answered", value: answered, color: "#22c55e" },
-    { name: "Missed", value: missed, color: "#ef4444" },
+    { name: "Answered", value: answered, color: "#34d399" },
+    { name: "Missed", value: missed, color: "#f87171" },
   ];
 }
 

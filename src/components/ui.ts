@@ -5,32 +5,32 @@ import type { CSSProperties } from "react";
  * globals.css. Centralized so every page and component looks consistent.
  */
 
+// CSS-variable references. Theme-aware automatically (the variables flip with
+// the data-theme attribute). Use these everywhere except SVG charts, which
+// cannot resolve var() and instead read the JS palette from useTheme().
 export const colors = {
   background: "var(--background)",
+  surface: "var(--surface)",
   foreground: "var(--foreground)",
+  foregroundStrong: "var(--foreground-strong)",
   muted: "var(--muted)",
+  mutedStrong: "var(--muted-strong)",
   card: "var(--card)",
+  cardHover: "var(--card-hover)",
   border: "var(--border)",
+  borderStrong: "var(--border-strong)",
   accent: "var(--accent)",
-};
-
-// Concrete hex values, for places that cannot use CSS vars (e.g. Recharts props).
-export const hex = {
-  background: "#0b0e14",
-  foreground: "#e6e9ef",
-  muted: "#9aa4b2",
-  card: "#141925",
-  border: "#232a3a",
-  accent: "#3b82f6",
-  green: "#22c55e",
-  red: "#ef4444",
-  amber: "#eab308",
+  accentHover: "var(--accent-hover)",
+  success: "var(--success)",
+  danger: "var(--danger)",
+  warning: "var(--warning)",
 };
 
 export const card: CSSProperties = {
   background: colors.card,
   border: `1px solid ${colors.border}`,
   borderRadius: 12,
+  boxShadow: "var(--shadow-sm)",
 };
 
 export const table: CSSProperties = {

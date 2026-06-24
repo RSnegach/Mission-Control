@@ -51,6 +51,12 @@ The app has a persistent left sidebar across these tabs:
 
 The landing page at `/` stays outside the app shell (no sidebar).
 
+**Light and dark mode.** Toggle from the sidebar footer (or the landing page header).
+The choice persists in `localStorage` and an inline script applies it before first
+paint, so there is no flash. With no saved choice the app follows the OS preference,
+defaulting to dark. Theme tokens live as CSS variables in `globals.css`; charts read a
+matching JS palette (`src/lib/theme.ts`) since SVG cannot resolve CSS variables.
+
 ### Exercise the webhooks without a phone
 
 The webhooks are plain POST endpoints. Drive them with curl while `npm run dev` runs:

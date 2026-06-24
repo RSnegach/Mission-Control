@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { colors } from "./ui";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/calls", label: "Calls" },
-  { href: "/clients", label: "Clients" },
-  { href: "/requests", label: "Requests" },
-  { href: "/messages", label: "Messages" },
+  { href: "/dashboard", label: "Dashboard", icon: "▦" },
+  { href: "/calls", label: "Calls", icon: "☏" },
+  { href: "/clients", label: "Clients", icon: "♢" },
+  { href: "/requests", label: "Requests", icon: "✓" },
+  { href: "/messages", label: "Messages", icon: "✉" },
 ];
 
 export function Sidebar() {
@@ -18,33 +19,52 @@ export function Sidebar() {
   return (
     <aside
       style={{
-        width: 220,
+        width: 232,
         flexShrink: 0,
         borderRight: `1px solid ${colors.border}`,
-        padding: "24px 16px",
+        background: colors.surface,
+        padding: "22px 16px",
         minHeight: "100vh",
         position: "sticky",
         top: 0,
         alignSelf: "flex-start",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <Link
         href="/"
         style={{
-          display: "block",
-          fontSize: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          fontSize: 15,
           fontWeight: 700,
-          color: colors.foreground,
+          color: colors.foregroundStrong,
           textDecoration: "none",
-          padding: "0 8px 20px",
+          padding: "0 8px 22px",
         }}
       >
+        <span
+          aria-hidden
+          style={{
+            display: "inline-grid",
+            placeItems: "center",
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            background: colors.accent,
+            color: "var(--accent-contrast)",
+            fontSize: 14,
+          }}
+        >
+          ◉
+        </span>
         Mission Control
       </Link>
 
-      <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <nav style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
         {NAV.map((item) => {
-          // Active when the path matches or is a sub-route (e.g. /clients/123).
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
@@ -52,20 +72,36 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               style={{
-                padding: "8px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+                padding: "9px 12px",
                 borderRadius: 8,
                 fontSize: 14,
                 fontWeight: active ? 600 : 500,
                 textDecoration: "none",
-                color: active ? colors.foreground : colors.muted,
-                background: active ? "var(--accent)" : "transparent",
+                color: active ? colors.foregroundStrong : colors.muted,
+                background: active ? colors.cardHover : "transparent",
+                borderLeft: active
+                  ? `2px solid ${colors.accent}`
+                  : "2px solid transparent",
               }}
             >
+              <span
+                aria-hidden
+                style={{ width: 16, textAlign: "center", color: active ? colors.accent : colors.muted }}
+              >
+                {item.icon}
+              </span>
               {item.label}
             </Link>
           );
         })}
       </nav>
+
+      <div style={{ marginTop: 16 }}>
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

@@ -1,23 +1,28 @@
 "use client";
 
-import { hex } from "../ui";
+import type { Palette } from "@/lib/theme";
 
-/** Shared dark tooltip styles for Recharts. */
-export const tooltipProps = {
-  contentStyle: {
-    background: hex.card,
-    border: `1px solid ${hex.border}`,
-    borderRadius: 8,
-    color: hex.foreground,
-    fontSize: 12,
-  },
-  labelStyle: { color: hex.muted },
-  itemStyle: { color: hex.foreground },
-  cursor: { fill: "rgba(255,255,255,0.04)" },
-} as const;
+/** Dark/light tooltip + axis props derived from the active palette. */
+export function tooltipProps(p: Palette) {
+  return {
+    contentStyle: {
+      background: p.surface,
+      border: `1px solid ${p.border}`,
+      borderRadius: 8,
+      color: p.foreground,
+      fontSize: 12,
+      boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+    },
+    labelStyle: { color: p.muted },
+    itemStyle: { color: p.foreground },
+    cursor: { fill: "rgba(127,127,127,0.10)" },
+  } as const;
+}
 
-export const axisProps = {
-  stroke: hex.muted,
-  tick: { fill: hex.muted, fontSize: 11 },
-  tickLine: false,
-} as const;
+export function axisProps(p: Palette) {
+  return {
+    stroke: p.border,
+    tick: { fill: p.muted, fontSize: 11 },
+    tickLine: false,
+  } as const;
+}

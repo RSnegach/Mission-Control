@@ -6,17 +6,22 @@ export function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
       style={{
-        display: "inline-block",
-        padding: "2px 8px",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "2px 9px",
         borderRadius: 999,
         fontSize: 12,
         fontWeight: 600,
         color,
-        background: `${color}22`, // ~13% alpha tint
-        border: `1px solid ${color}55`,
+        // Mix the status color into the page surface so the tint reads cleanly
+        // in both light and dark themes instead of a flat alpha overlay.
+        background: `color-mix(in srgb, ${color} 14%, var(--surface))`,
+        border: `1px solid color-mix(in srgb, ${color} 35%, var(--surface))`,
         whiteSpace: "nowrap",
       }}
     >
+      <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: color }} />
       {label}
     </span>
   );
