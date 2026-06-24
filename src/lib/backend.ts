@@ -79,9 +79,27 @@ export interface DataBackend {
   }): Promise<Message>;
 }
 
-/** True when the app should run entirely on mock data, with no Supabase/Twilio. */
+/**
+ * Telephony mock flag. Independent of where data is stored: in mock mode the
+ * Twilio webhooks skip signature validation and outbound sends are not placed.
+ */
 export function isMockMode(): boolean {
   return process.env.MOCK_MODE === "true";
+}
+
+export type StorageBackendKind = "memory" | "sqlite" | "supabase";
+
+/**
+ * Which durable store backs the data layer, chosen by DATA_BACKEND.
+ * Defaults to "memory" when unset to preserve prior behavior.
+ *   memory   - in-memory, reseeds each process start (volatile)
+ *   sqlite   - durable local file under ./.data (real, per-business, no cloud)
+ *   supabase - managed Postgres (production; works on serverless)
+ */
+export function storageBackend(): StorageBackendKind {
+  const v = (process.env.DATA_BACKEND ?? "").trim().toLowerCase();
+  if (v === "sqlite" || v === "supabase" || v === "memory") return v;
+  return "memory";
 }
 
 let cached: DataBackend | null = null;
@@ -90,8 +108,23 @@ let cached: DataBackend | null = null;
 export function getBackend(): DataBackend {
   if (cached) return cached;
 
-  // Both classes are import-safe: SupabaseBackend only constructs the supabase
-  // client lazily inside getAdminClient(), so importing it in mock mode is inert.
-  cached = isMockMode() ? new MockBackend() : new SupabaseBackend();
+  switch (storageBackend()) {
+    case "sqlite": {
+      // Lazy require so node:sqlite (and the file store) never enter the bundle
+      // graph unless this backend is actually selected.
+      const { SqliteBackend } = require("./sqlite-backend") as typeof import("./sqlite-backend");
+      cached = new SqliteBackend();
+      break;
+    }
+    case "supabase":
+      // SupabaseBackend constructs its client lazily, so this import is inert
+      // until a query runs.
+      cached = new SupabaseBackend();
+      break;
+    case "memory":
+    default:
+      cached = new MockBackend();
+      break;
+  }
   return cached;
 }

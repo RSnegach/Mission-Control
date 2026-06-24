@@ -82,17 +82,28 @@ you restart `npm run dev`. The seeded number to call is `+13215550100`.
 
 ## How mock vs real is wired
 
-The app never talks to Supabase directly. It talks to a `DataBackend` adapter
-(`src/lib/backend.ts`), and `getBackend()` picks the implementation from `MOCK_MODE`:
+Two independent switches:
 
-- `MockBackend` (`src/lib/mock-backend.ts`) — in-memory seeded store.
-- `SupabaseBackend` (`src/lib/supabase-backend.ts`) — real Postgres, unchanged logic.
+- **`DATA_BACKEND`** selects where data is stored. The app never talks to a database
+  directly; it talks to a `DataBackend` adapter (`src/lib/backend.ts`) and `getBackend()`
+  picks one:
+  - `memory` (default) — `MockBackend`, in-memory, reseeds each start, volatile.
+  - `sqlite` — `SqliteBackend`, a durable local file at `./.data/mission-control.sqlite`,
+    real and per-business, no cloud account. Seeded with ~12 months of demo history on
+    first run. This is the local-dev default in `.env.local`.
+  - `supabase` — `SupabaseBackend`, managed Postgres for production.
+- **`MOCK_MODE`** controls telephony only: when `true`, Twilio signature validation is
+  skipped and outbound SMS is persisted without calling Twilio.
 
-The Twilio webhooks and the dashboard import from `src/lib/data.ts`, a thin facade
-over the active backend, so flipping to real infrastructure is a config change, not a
-code change. Twilio signature validation is also auto-skipped in mock mode.
+The webhooks and pages import from `src/lib/data.ts`, a thin facade over the active
+backend, so switching storage or telephony is config, not code.
 
-To switch to real services later: set `MOCK_MODE=false` (or remove it) and fill in the
+**Important for production:** `DATA_BACKEND=sqlite` writes to the local filesystem, which
+does NOT work on Vercel serverless (ephemeral, read-only). Deploy with
+`DATA_BACKEND=supabase` after running the migrations in `supabase/migrations/`. The
+sqlite store is for local dev or a single always-on host.
+
+To go fully live: set `DATA_BACKEND=supabase`, `MOCK_MODE=false`, and fill in the
 Supabase and Twilio vars below.
 
 ## Stack

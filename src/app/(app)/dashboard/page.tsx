@@ -2,15 +2,16 @@ import {
   getPrimaryBusiness,
   listCalls,
   listMissedRequests,
+  listRecentMessages,
 } from "@/lib/data";
-import { callsByHour, callsByDay, answeredVsMissed, isToday } from "@/lib/analytics";
+import { callsByHour, answeredVsMissed, isToday } from "@/lib/analytics";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard, StatRow } from "@/components/StatCard";
 import { Section, Empty } from "@/components/Section";
 import { ChartCard } from "@/components/charts/ChartCard";
 import CallsByHourChart from "@/components/charts/CallsByHourChart";
-import CallsByDayChart from "@/components/charts/CallsByDayChart";
 import AnsweredDonut from "@/components/charts/AnsweredDonut";
+import { AnalyticsPanel } from "@/components/AnalyticsPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,10 @@ export default async function DashboardPage() {
   }
 
   const tz = business.timezone;
-  const [calls, missed] = await Promise.all([
-    listCalls(business.id, 500),
+  const [calls, missed, messages] = await Promise.all([
+    listCalls(business.id, 5000),
     listMissedRequests(business.id, 100),
+    listRecentMessages(business.id, 5000),
   ]);
 
   const todays = calls.filter((c) => c.created_at && isToday(c.created_at, tz));
@@ -42,7 +44,6 @@ export default async function DashboardPage() {
       : null;
 
   const byHour = callsByHour(calls, tz);
-  const byDay = callsByDay(calls, tz, 7);
   const donut = answeredVsMissed(calls, tz);
 
   return (
@@ -72,11 +73,12 @@ export default async function DashboardPage() {
             <AnsweredDonut data={donut} />
           </ChartCard>
         </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 16 }}>
-          <ChartCard title="Calls per day (last 7 days)" flex="1 1 100%">
-            <CallsByDayChart data={byDay} />
-          </ChartCard>
-        </div>
+      </Section>
+
+      <Section title="Trends">
+        <ChartCard title="Overlay metrics over time" flex="1 1 100%">
+          <AnalyticsPanel calls={calls} messages={messages} timezone={tz} />
+        </ChartCard>
       </Section>
     </>
   );
