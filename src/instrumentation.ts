@@ -18,8 +18,10 @@ export async function register(): Promise<void> {
   const base = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const SWEEP_INTERVAL_MS = 10_000;
 
+  const secret = process.env.ACK_SWEEP_SECRET;
+  const headers: Record<string, string> = secret ? { "x-ack-secret": secret } : {};
   const handle = setInterval(() => {
-    fetch(`${base}/api/internal/ack-sweep`, { method: "POST" }).catch(() => {
+    fetch(`${base}/api/internal/ack-sweep`, { method: "POST", headers }).catch(() => {
       // Server may still be starting, or briefly down; ignore and retry next tick.
     });
   }, SWEEP_INTERVAL_MS);

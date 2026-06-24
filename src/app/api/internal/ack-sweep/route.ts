@@ -10,7 +10,13 @@ export const dynamic = "force-dynamic";
  * production scheduled cron would call. Kept off the public surface; in production
  * protect it with a shared secret.
  */
-export async function POST() {
+export async function POST(req: Request) {
+  // When a secret is configured, require it (the endpoint is reachable over the
+  // public ngrok URL). When unset, allow (local dev).
+  const secret = process.env.ACK_SWEEP_SECRET;
+  if (secret && req.headers.get("x-ack-secret") !== secret) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
   try {
     const result = await sendDueAcks();
     return Response.json(result);

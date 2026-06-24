@@ -157,78 +157,91 @@ Note: the `messages` SMS data is mock-only for now. The `Message` type and backe
 reads exist, and `SupabaseBackend` has matching queries, but a `messages` table
 migration is a later step before mock mode is turned off.
 
-## Going live with real services
+## Go live for testing (real Supabase + Twilio, local + ngrok)
 
-Everything below applies only when you turn off mock mode (`MOCK_MODE=false`). Skip
-it entirely while you're running the local mock demo above.
+This runs the app against real services for testing, at roughly $0, reachable over a
+public ngrok URL behind a shared password. Real calls and texts flow through Twilio
+into a real Supabase database. It only works while your machine + ngrok are running.
 
-### 1. Database setup (Supabase)
+Cost: Supabase Free (pauses after a week idle), a Twilio trial (free units, one
+number, can only call/text VERIFIED numbers, 30-day expiry, no A2P needed), and the
+ngrok free static domain. Real money starts later: a Twilio number is ~$1.15/mo plus
+usage once you leave the trial, and business SMS then needs A2P 10DLC registration.
 
-1. Create a project at supabase.com. Free tier is fine for the demo.
-2. Open the SQL editor and run `supabase/migrations/0001_init.sql`.
-3. Edit `supabase/seed.sql`: set `twilio_numbers.phone_number` to your Twilio number
-   (E.164, e.g. `+13215550100`) and `business_settings.default_route_phone` to the
-   phone you want calls forwarded to (your cell for the demo). Run it.
+### 1. Supabase
 
-### 2. Environment variables
+1. Create a free project at supabase.com.
+2. SQL editor: run the migrations in order, `0001_init.sql` through `0005_ack.sql`.
+3. Edit `supabase/seed.sql` (the two `EDIT ME` lines): set `twilio_numbers.phone_number`
+   to your Twilio number and `default_route_phone` to your verified cell. Run it.
+4. Settings → API: copy the Project URL, the anon key, and the service_role key.
 
-Copy `.env.example` to `.env.local` and fill in:
+### 2. Twilio (trial)
 
-| Var | Where to find it |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project settings → API → Project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → API → service_role key (server only, secret) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → API → anon key |
-| `TWILIO_ACCOUNT_SID` | Twilio console |
-| `TWILIO_AUTH_TOKEN` | Twilio console |
-| `APP_BASE_URL` | your public HTTPS URL (ngrok in dev, no trailing slash) |
-| `TWILIO_VALIDATE_SIGNATURE` | `false` for first local tests, `true` before production |
+1. Create a trial account. Verify your own cell under Phone Numbers → Verified Caller IDs
+   (on trial you can only call/text verified numbers).
+2. Get your trial number. Note the Account SID and Auth Token from the console.
 
-Set `MOCK_MODE=false` so the app uses these instead of the in-memory store.
-`APP_BASE_URL` must exactly match the webhook URL you set in Twilio, including
-`https` and no trailing slash. Signature validation hashes that URL, so a mismatch
-makes valid requests fail once validation is on.
-
-### 3. Run locally
-
-```bash
-npm install
-npm run dev          # http://localhost:3000
-```
-
-Visit `/dashboard`. With the seed loaded it shows the demo business and empty tables.
-
-### 4. Expose to Twilio with ngrok
-
-Twilio must reach your machine over public HTTPS.
+### 3. ngrok
 
 ```bash
 ngrok http 3000
 ```
 
-Copy the `https://....ngrok-free.app` URL into `.env.local` as `APP_BASE_URL`, then
-restart `npm run dev`.
+Use your free static domain so the URL is stable across restarts. Copy the `https://` URL.
 
-### 5. Twilio console configuration
+### 4. `.env.local`
 
-1. Buy a number (or use a trial number) with Voice enabled.
-2. Phone Numbers → your number → Voice Configuration.
-3. **A call comes in** → Webhook →
-   `https://<your-ngrok>.ngrok-free.app/api/twilio/voice/incoming` → HTTP POST.
-4. Save. The `dial-result` callback is set by the TwiML itself; no console step needed.
+```
+MOCK_MODE=false
+DATA_BACKEND=supabase
+NEXT_PUBLIC_SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...        # server only, secret
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+APP_BASE_URL=https://<your-ngrok-domain>   # no trailing slash, must match Twilio exactly
+TWILIO_VALIDATE_SIGNATURE=true
+SITE_PASSWORD=<choose a password>
+ACK_SWEEP_SECRET=<any random string>
+```
 
-On a Twilio trial account you can only forward to verified numbers, and calls open
-with a trial notice. Both are fine for the demo.
+`APP_BASE_URL` must byte-match the webhook URLs you set in Twilio (scheme + host +
+path, no trailing slash), or signature validation rejects the requests.
 
-### 6. MVP 1 success test
+### 5. Twilio console webhooks
 
-1. Call your Twilio number from another phone.
-2. It greets you and rings the route phone.
-3. Answer it → dashboard shows the call as **Answered** with a duration.
-4. Repeat and **ignore** the call → after the dial timeout the dashboard shows it as
-   **Missed**, and a "Missed call callback" appears in the callback queue with a due time.
+On your number, both set to **HTTP POST**:
 
-That is the spine: inbound call → log → route → missed → request → dashboard.
+- Voice, "A call comes in" → `<APP_BASE_URL>/api/twilio/voice/incoming`
+- Messaging, "A message comes in" → `<APP_BASE_URL>/api/twilio/messaging/incoming`
+
+The dial-result callback is set by the TwiML itself; no console step.
+
+### 6. Run and test
+
+```bash
+npm run dev
+```
+
+Open `<APP_BASE_URL>/login`, enter `SITE_PASSWORD`. Then from your verified cell:
+
+- Call the Twilio number → it forwards to your route phone and logs the call. Ignore it →
+  a missed-call callback appears and the follow-up text is sent.
+- Text the Twilio number → the reply shows in Messages, and about 30 seconds after your
+  last text an acknowledgment is sent back.
+
+Everything is stored in Supabase and visible on the live dashboard.
+
+### Notes
+
+- The shared password is a single site-wide gate, not per-user login. Per-tenant auth is
+  a later step.
+- Local mock mode is unaffected: leave `SITE_PASSWORD` unset and `MOCK_MODE=true` /
+  `DATA_BACKEND=sqlite` for the offline demo.
+- The 30s ack timer runs because this is a persistent local process. On serverless hosts
+  it would need a scheduled cron hitting `/api/internal/ack-sweep` (guarded by
+  `ACK_SWEEP_SECRET`).
 
 ## How multi-tenancy works
 
