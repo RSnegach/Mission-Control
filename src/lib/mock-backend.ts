@@ -57,7 +57,7 @@ function seed(): MockStore {
     callback_sla_minutes: 60,
     sms_followup_enabled: true,
     sms_followup_template:
-      "Hi {name}, this is {business}. Sorry we missed your call. Reply here and we'll help you out.",
+      "Hi {name}, this is {business}. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.",
     created_at: now,
     updated_at: now,
   };
@@ -91,24 +91,21 @@ function seed(): MockStore {
     if (c) c.created_request_id = r.id;
   }
 
-  // SMS threads for the missed calls: an automated "sorry we missed you" text and
-  // the caller's replies. Three states: 2 replies, 1 reply, and 0 replies (texted,
-  // no answer yet). Anchored by request_id; from/to relative to the Twilio number tn.
-  const AUTO_TEXT =
-    "Hi, this is Demo Marine Repair. Sorry we missed your call. How can we help?";
-
+  // SMS threads for the missed calls. Three states: 2 replies, 1 reply, and 0
+  // replies (texted, no answer yet). Every body is distinct. Anchored by
+  // request_id; from/to relative to the Twilio number tn.
   const messages: Message[] = [
     // req_1 / call_2 -> Smith LLC (+13215550144): auto-text + 2 replies
-    mkMsg({ id: "msg_1", businessId, contactId: "con_2", requestId: "req_1", dir: "outbound", from: tn, to: "+13215550144", body: AUTO_TEXT, status: "delivered", minsAgo: 139 }),
-    mkMsg({ id: "msg_2", businessId, contactId: "con_2", requestId: "req_1", dir: "inbound", from: "+13215550144", to: tn, body: "Hey, my boat's inboard is overheating. Need a diagnostic this week.", status: "received", minsAgo: 135 }),
+    mkMsg({ id: "msg_1", businessId, contactId: "con_2", requestId: "req_1", dir: "outbound", from: tn, to: "+13215550144", body: "Hi Smith LLC, this is Demo Marine Repair. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.", status: "delivered", minsAgo: 139 }),
+    mkMsg({ id: "msg_2", businessId, contactId: "con_2", requestId: "req_1", dir: "inbound", from: "+13215550144", to: tn, body: "Hey, my boat's inboard is overheating after about ten minutes. Need a diagnostic this week.", status: "received", minsAgo: 135 }),
     mkMsg({ id: "msg_3", businessId, contactId: "con_2", requestId: "req_1", dir: "inbound", from: "+13215550144", to: tn, body: "It's a 2019 Sea Ray. Can someone call me back today?", status: "received", minsAgo: 134 }),
 
     // req_2 / call_3 -> (+14075558831): auto-text + 1 reply
-    mkMsg({ id: "msg_4", businessId, contactId: "con_3", requestId: "req_2", dir: "outbound", from: tn, to: "+14075558831", body: AUTO_TEXT, status: "delivered", minsAgo: 94 }),
-    mkMsg({ id: "msg_5", businessId, contactId: "con_3", requestId: "req_2", dir: "inbound", from: "+14075558831", to: tn, body: "Looking for a quote to winterize two outboards.", status: "received", minsAgo: 90 }),
+    mkMsg({ id: "msg_4", businessId, contactId: "con_3", requestId: "req_2", dir: "outbound", from: tn, to: "+14075558831", body: "Hi there, this is Demo Marine Repair. Sorry we missed your call. Send over a few details on what you need and we'll follow up shortly.", status: "delivered", minsAgo: 94 }),
+    mkMsg({ id: "msg_5", businessId, contactId: "con_3", requestId: "req_2", dir: "inbound", from: "+14075558831", to: tn, body: "Looking for a quote to winterize two outboards before the season ends.", status: "received", minsAgo: 90 }),
 
     // req_3 / call_5 -> ABC Marine (+14075550123): auto-text + 0 replies
-    mkMsg({ id: "msg_6", businessId, contactId: "con_1", requestId: "req_3", dir: "outbound", from: tn, to: "+14075550123", body: AUTO_TEXT, status: "delivered", minsAgo: 24 }),
+    mkMsg({ id: "msg_6", businessId, contactId: "con_1", requestId: "req_3", dir: "outbound", from: tn, to: "+14075550123", body: "Hi John, this is Demo Marine Repair. Sorry we missed your call. Let us know what's going on with the boat and we'll reach out as soon as we can.", status: "delivered", minsAgo: 24 }),
   ];
 
   return {

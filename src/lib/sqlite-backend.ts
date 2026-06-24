@@ -625,6 +625,9 @@ const SEED = {
   followupRate: 0.7,
   replyRate: 0.5,
   extraContacts: 12,
+  // Only seed SMS threads for missed calls within this recent window, so the
+  // inbox stays a believable size and every seeded body can be unique.
+  messageWindowDays: 21,
 };
 
 function randInt(a: number, b: number): number {
@@ -731,7 +734,7 @@ function seedIfEmpty(db: SqliteDB): void {
     ).run(
       "set_demo", businessId, route,
       "Thanks for calling Demo Marine Repair. Please leave a message after the beep.",
-      "Hi {name}, this is {business}. Sorry we missed your call. Reply here and we'll help you out.",
+      "Hi {name}, this is {business}. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.",
       now, now,
     );
 
@@ -766,13 +769,71 @@ function seedIfEmpty(db: SqliteDB): void {
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, ?)`,
     );
 
-    const REPLIES = [
-      "Yes, please call me back.",
-      "Looking for a quote on engine service.",
-      "Need to reschedule my appointment.",
-      "What are your hours this week?",
-      "Thanks, talk soon.",
+    // Unique-message generators so the seeded inbox never repeats a body.
+    const usedBodies = new Set<string>();
+    const unique = (candidates: () => string): string => {
+      for (let i = 0; i < 60; i++) {
+        const b = candidates();
+        if (!usedBodies.has(b)) {
+          usedBodies.add(b);
+          return b;
+        }
+      }
+      // Exhausted the obvious combinations; force uniqueness.
+      const b = `${candidates()} (#${usedBodies.size + 1})`;
+      usedBodies.add(b);
+      return b;
+    };
+
+    // Inbound replies: opener + marine-repair topic + closer, large combinatorial space.
+    const IN_OPEN = ["Hi, ", "Hey, ", "Morning, ", "Hello, ", "Quick one, ", ""];
+    const IN_TOPIC = [
+      "the inboard is overheating after about ten minutes",
+      "I need a quote to winterize two outboards",
+      "the bilge pump keeps cycling on and off",
+      "my trim tabs stopped responding",
+      "looking to schedule annual engine service",
+      "there's a fuel smell in the cabin",
+      "the lower unit is leaking gear oil",
+      "need new zincs and a hull inspection",
+      "the chartplotter won't hold a GPS fix",
+      "starboard engine is hard to start when cold",
+      "want an estimate on gelcoat repair",
+      "the shore power keeps tripping the breaker",
+      "props are dinged up and need reconditioning",
+      "the steering feels stiff at the helm",
+      "AC raw water pump seems weak",
+      "need a haul-out and bottom paint quote",
+      "batteries aren't holding a charge overnight",
+      "the head is clogged again",
+      "VHF radio has no transmit power",
+      "want to book a pre-purchase survey",
+      "the trailer bearings are running hot",
+      "engine alarm went off near the inlet",
+      "need a generator impeller replaced",
+      "the canvas needs restitching before season",
+      "looking for repower options on a 2008 cruiser",
     ];
+    const IN_CLOSE = [
+      ". Can someone call me back?",
+      ". When can you take a look?",
+      ". What would that run?",
+      ". Are you open this weekend?",
+      ". No rush, just need an idea on timing.",
+      ". Trying to get out on the water this week.",
+      ".",
+    ];
+    const replyBody = () =>
+      unique(() => {
+        const s = pick(IN_OPEN) + pick(IN_TOPIC) + pick(IN_CLOSE);
+        return s.charAt(0).toUpperCase() + s.slice(1);
+      });
+
+    // Outbound follow-up: the live product sends one fixed template, so seeded
+    // outbound bodies legitimately share wording. Not deduped (would force ugly
+    // suffixes); only the inbound replies above are kept unique.
+    const outboundBody = (name: string) =>
+      `Hi ${name}, this is Demo Marine Repair. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.`;
 
     for (const c of calls) {
       const startedIso = c.startedAt.toISOString();
@@ -793,13 +854,14 @@ function seedIfEmpty(db: SqliteDB): void {
         const dueIso = new Date(c.startedAt.getTime() + 60 * 60_000).toISOString();
         insReq.run(c.requestId, businessId, c.contact.id, c.id, reqStatus, dueIso, startedIso, startedIso);
 
-        if (chance(SEED.followupRate)) {
+        const ageDaysForMsg = (Date.now() - c.startedAt.getTime()) / dayMs;
+        if (ageDaysForMsg <= SEED.messageWindowDays && chance(SEED.followupRate)) {
           const outMs = c.startedAt.getTime() + 60_000;
           const name = c.contact.name?.split(" ")[0] ?? "there";
           insMsg.run(
             newId("msg"), businessId, c.contact.id, c.requestId, `SM_seed_${c.id}`,
             "outbound", tn, c.contact.phone,
-            `Hi ${name}, this is Demo Marine Repair. Sorry we missed your call. Reply here and we'll help you out.`,
+            outboundBody(name),
             "delivered", new Date(outMs).toISOString(),
           );
           if (chance(SEED.replyRate)) {
@@ -808,7 +870,7 @@ function seedIfEmpty(db: SqliteDB): void {
               const inMs = outMs + (r + 1) * randInt(2, 30) * 60_000;
               insMsg.run(
                 newId("msg"), businessId, c.contact.id, c.requestId, null,
-                "inbound", c.contact.phone, tn, pick(REPLIES), "received",
+                "inbound", c.contact.phone, tn, replyBody(), "received",
                 new Date(inMs).toISOString(),
               );
             }

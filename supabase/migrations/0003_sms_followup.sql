@@ -13,5 +13,5 @@ alter table business_settings
 -- replaced at send time; {name} falls back to "there" when the caller is unknown.
 update business_settings
 set sms_followup_template =
-  'Hi {name}, this is {business}. Sorry we missed your call. Reply here and we''ll help you out.'
+  'Hi {name}, this is {business}. Sorry we missed your call. Drop a quick description of what we can help you with and we''ll get back to you as soon as possible.'
 where sms_followup_template is null;

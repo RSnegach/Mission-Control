@@ -131,7 +131,7 @@ function dayLabel(iso: string, tz: string): string {
 // Adjustable-range, multi-metric trend series
 // ===========================================================================
 
-export type RangePreset = "week" | "month" | "year" | "custom";
+export type RangePreset = "today" | "week" | "month" | "year" | "custom";
 export interface TimeRange {
   preset: RangePreset;
   start?: string; // YYYY-MM-DD, custom only
@@ -146,6 +146,21 @@ export interface ResolvedRange {
 }
 
 const DAY_MS = 86_400_000;
+
+/** Epoch ms of the start of `now`'s calendar day in the given timezone. */
+function startOfTodayMs(tz: string, now: number): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(now));
+  const p = (t: string) => Number(parts.find((x) => x.type === t)?.value) || 0;
+  const hour = p("hour") === 24 ? 0 : p("hour");
+  const elapsedToday = (hour * 3600 + p("minute") * 60 + p("second")) * 1000;
+  return now - elapsedToday; // local midnight today for tz
+}
 
 function monthKey(iso: string, tz: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit" })
@@ -169,6 +184,9 @@ export function resolveRange(range: TimeRange, tz: string, now = Date.now()): Re
     endMs = new Date(`${range.end}T23:59:59`).getTime();
     const span = endMs - startMs;
     bucket = span <= 31 * DAY_MS ? "day" : span <= 180 * DAY_MS ? "week" : "month";
+  } else if (range.preset === "today") {
+    startMs = startOfTodayMs(tz, now);
+    bucket = "day";
   } else if (range.preset === "year") {
     startMs = now - 365 * DAY_MS;
     bucket = "month";

@@ -20,6 +20,8 @@ import { TimeRangeControls } from "./charts/TimeRangeControls";
 /** Short scope label for the stat cards, e.g. "this month". */
 function rangeHint(range: TimeRange): string {
   switch (range.preset) {
+    case "today":
+      return "today";
     case "week":
       return "last 7 days";
     case "month":

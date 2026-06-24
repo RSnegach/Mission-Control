@@ -17,4 +17,4 @@ export function renderTemplate(
 
 /** Default used when a business has no template set. */
 export const DEFAULT_FOLLOWUP_TEMPLATE =
-  "Hi {name}, this is {business}. Sorry we missed your call. Reply here and we'll help you out.";
+  "Hi {name}, this is {business}. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.";

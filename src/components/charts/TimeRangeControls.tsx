@@ -4,6 +4,7 @@ import type { RangePreset, TimeRange } from "@/lib/analytics";
 import { colors } from "../ui";
 
 const PRESETS: { key: RangePreset; label: string }[] = [
+  { key: "today", label: "Today" },
   { key: "week", label: "Week" },
   { key: "month", label: "Month" },
   { key: "year", label: "Year" },
