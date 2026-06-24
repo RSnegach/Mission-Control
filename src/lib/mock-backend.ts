@@ -58,6 +58,9 @@ function seed(): MockStore {
     sms_followup_enabled: true,
     sms_followup_template:
       "Hi {name}, this is {business}. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.",
+    ack_enabled: true,
+    ack_template:
+      "Thanks {name}, this is {business}. We've received your message and will get back to you very soon.",
     created_at: now,
     updated_at: now,
   };
@@ -187,6 +190,8 @@ function mkReq(p: { id: string; businessId: string; contactId: string | null; ca
     due_at: due,
     description: null,
     source: "call",
+    ack_due_at: null,
+    ack_sent_at: null,
     created_at: created,
     updated_at: created,
   };
@@ -312,6 +317,8 @@ export class MockBackend implements DataBackend {
       due_at: new Date(Date.now() + slaMinutes * 60_000).toISOString(),
       description: null,
       source: "call",
+      ack_due_at: null,
+      ack_sent_at: null,
       created_at: now,
       updated_at: now,
     };
@@ -486,5 +493,65 @@ export class MockBackend implements DataBackend {
     c.name = name;
     c.updated_at = new Date().toISOString();
     return c;
+  }
+
+  async createInboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+    mediaUrls?: string[] | null;
+  }): Promise<Message> {
+    const s = store();
+    if (params.twilioMessageSid) {
+      const existing = s.messages.find((m) => m.twilio_message_sid === params.twilioMessageSid);
+      if (existing) return existing;
+    }
+    const msg: Message = {
+      id: nextId(s, "msg"),
+      business_id: params.businessId,
+      contact_id: params.contactId,
+      request_id: params.requestId,
+      twilio_message_sid: params.twilioMessageSid ?? null,
+      direction: "inbound",
+      from_number: params.fromNumber,
+      to_number: params.toNumber,
+      body: params.body,
+      status: params.status ?? "received",
+      media_urls: params.mediaUrls ?? null,
+      created_at: new Date().toISOString(),
+    };
+    s.messages.push(msg);
+    return msg;
+  }
+
+  async listDueAckThreads(now: string, limit = 100): Promise<CallRequest[]> {
+    return store()
+      .requests.filter(
+        (r) => r.ack_due_at !== null && r.ack_sent_at === null && r.ack_due_at <= now,
+      )
+      .sort((a, b) => (a.ack_due_at ?? "").localeCompare(b.ack_due_at ?? ""))
+      .slice(0, limit);
+  }
+
+  async armAck(businessId: string, requestId: string, dueAt: string): Promise<void> {
+    const r = store().requests.find(
+      (x) => x.business_id === businessId && x.id === requestId,
+    );
+    if (r && r.ack_sent_at === null) r.ack_due_at = dueAt;
+  }
+
+  async markAckSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+    const r = store().requests.find(
+      (x) => x.business_id === businessId && x.id === requestId,
+    );
+    if (!r || r.ack_sent_at !== null) return false;
+    r.ack_sent_at = sentAt;
+    r.ack_due_at = null;
+    return true;
   }
 }

@@ -3,6 +3,7 @@ import {
   listRecentMessages,
   getContactsByIds,
 } from "@/lib/data";
+import { sendDueAcks } from "@/lib/ack";
 import { groupMessages } from "@/lib/analytics";
 import { PageHeader } from "@/components/PageHeader";
 import { Empty } from "@/components/Section";
@@ -20,6 +21,9 @@ export default async function MessagesPage() {
       </>
     );
   }
+
+  // Opportunistic sweep so acks advance on page load (covers serverless / no timer).
+  await sendDueAcks().catch(() => {});
 
   const tz = business.timezone;
   const messages = await listRecentMessages(business.id, 2000);

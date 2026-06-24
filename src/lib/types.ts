@@ -21,6 +21,8 @@ export interface BusinessSettings {
   callback_sla_minutes: number | null;
   sms_followup_enabled: boolean;
   sms_followup_template: string | null;
+  ack_enabled: boolean;
+  ack_template: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +82,8 @@ export interface CallRequest {
   due_at: string | null;
   description: string | null;
   source: string | null;
+  ack_due_at: string | null; // ISO UTC; when the auto-ack becomes eligible to send
+  ack_sent_at: string | null; // ISO UTC; set once the ack is sent (fire-once guard)
   created_at: string;
   updated_at: string;
 }

@@ -63,7 +63,11 @@ export interface DataBackend {
     patch: Partial<
       Pick<
         BusinessSettings,
-        "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+        | "default_route_phone"
+        | "sms_followup_enabled"
+        | "sms_followup_template"
+        | "ack_enabled"
+        | "ack_template"
       >
     >,
   ): Promise<BusinessSettings | null>;
@@ -77,12 +81,32 @@ export interface DataBackend {
     status?: string;
     twilioMessageSid?: string | null;
   }): Promise<Message>;
+  /** Record an inbound SMS. Idempotent on twilio_message_sid. */
+  createInboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+    mediaUrls?: string[] | null;
+  }): Promise<Message>;
   /** Set (or clear, with null) a contact's display name. Tenant-scoped. */
   updateContactName(
     businessId: string,
     contactId: string,
     name: string | null,
   ): Promise<Contact | null>;
+
+  // --- Auto-acknowledgment debounce (on requests) ---
+  /** Requests armed for an ack whose due time has passed and not yet acked. Global. */
+  listDueAckThreads(now: string, limit?: number): Promise<CallRequest[]>;
+  /** Set the ack due time on a request, only if it has not already been acked. */
+  armAck(businessId: string, requestId: string, dueAt: string): Promise<void>;
+  /** Atomically claim+mark a request acked. Returns true if this call won the claim. */
+  markAckSent(businessId: string, requestId: string, sentAt: string): Promise<boolean>;
 }
 
 /**

@@ -15,15 +15,21 @@ export function SettingsForm({
   enabled,
   template,
   defaultRoutePhone,
+  ackEnabled,
+  ackTemplate,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   businessName: string;
   enabled: boolean;
   template: string;
   defaultRoutePhone: string;
+  ackEnabled: boolean;
+  ackTemplate: string;
 }) {
   const [text, setText] = useState(template);
   const preview = renderTemplate(text || "", { business: businessName, name: "there" });
+  const [ackText, setAckText] = useState(ackTemplate);
+  const ackPreview = renderTemplate(ackText || "", { business: businessName, name: "there" });
 
   return (
     <form action={action} style={{ ...card, padding: "22px 24px", maxWidth: 640 }}>
@@ -88,7 +94,72 @@ export function SettingsForm({
         </div>
       </div>
 
-      <label style={{ ...labelStyle, marginTop: 20 }}>Forward calls to</label>
+      <div style={{ height: 1, background: colors.border, margin: "28px 0" }} />
+
+      <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 4px" }}>
+        Auto-acknowledgment text
+      </h2>
+      <p style={{ color: colors.muted, fontSize: 13, margin: "0 0 20px" }}>
+        After a caller replies, automatically text them back once, about 30 seconds
+        after their last message. Edit the message below.
+      </p>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          name="ack_enabled"
+          defaultChecked={ackEnabled}
+          style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
+        />
+        <span style={{ fontSize: 14 }}>Send an automatic acknowledgment after a caller replies</span>
+      </label>
+
+      <label style={labelStyle}>Acknowledgment template</label>
+      <textarea
+        name="ack_template"
+        value={ackText}
+        onChange={(e) => setAckText(e.target.value)}
+        rows={3}
+        style={{
+          width: "100%",
+          padding: "10px 12px",
+          borderRadius: 8,
+          background: colors.background,
+          border: `1px solid ${colors.border}`,
+          color: colors.foreground,
+          fontSize: 14,
+          fontFamily: "inherit",
+          resize: "vertical",
+          outline: "none",
+        }}
+      />
+      <p style={{ color: colors.muted, fontSize: 12, margin: "8px 0 0" }}>
+        Use <code>{"{business}"}</code> and <code>{"{name}"}</code>. Sent once, about
+        30 seconds after the caller stops texting.
+      </p>
+
+      <div style={{ marginTop: 16 }}>
+        <label style={labelStyle}>Preview</label>
+        <div
+          style={{
+            maxWidth: "78%",
+            marginLeft: "auto",
+            padding: "8px 12px",
+            borderRadius: 12,
+            borderBottomRightRadius: 3,
+            background: "var(--accent)",
+            color: "#fff",
+            fontSize: 14,
+            lineHeight: 1.4,
+          }}
+        >
+          {ackPreview || "Your message will appear here."}
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: colors.border, margin: "28px 0" }} />
+
+      <label style={{ ...labelStyle, marginTop: 0 }}>Forward calls to</label>
       <input
         name="default_route_phone"
         defaultValue={defaultRoutePhone}

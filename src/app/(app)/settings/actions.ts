@@ -14,11 +14,15 @@ export async function saveSettings(formData: FormData): Promise<void> {
   const enabled = formData.get("sms_followup_enabled") === "on";
   const template = String(formData.get("sms_followup_template") ?? "").trim();
   const routePhone = String(formData.get("default_route_phone") ?? "").trim();
+  const ackEnabled = formData.get("ack_enabled") === "on";
+  const ackTemplate = String(formData.get("ack_template") ?? "").trim();
 
   await updateSettings(business.id, {
     sms_followup_enabled: enabled,
     sms_followup_template: template || null,
     default_route_phone: routePhone || null,
+    ack_enabled: ackEnabled,
+    ack_template: ackTemplate || null,
   });
 
   revalidatePath("/settings");

@@ -416,7 +416,11 @@ export class SupabaseBackend implements DataBackend {
     patch: Partial<
       Pick<
         BusinessSettings,
-        "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+        | "default_route_phone"
+        | "sms_followup_enabled"
+        | "sms_followup_template"
+        | "ack_enabled"
+        | "ack_template"
       >
     >,
   ): Promise<BusinessSettings | null> {
@@ -478,5 +482,87 @@ export class SupabaseBackend implements DataBackend {
       .maybeSingle();
     if (error) throw error;
     return (data as Contact) ?? null;
+  }
+
+  async createInboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+    mediaUrls?: string[] | null;
+  }): Promise<Message> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("messages")
+      .insert({
+        business_id: params.businessId,
+        contact_id: params.contactId,
+        request_id: params.requestId,
+        twilio_message_sid: params.twilioMessageSid ?? null,
+        direction: "inbound",
+        from_number: params.fromNumber,
+        to_number: params.toNumber,
+        body: params.body,
+        status: params.status ?? "received",
+        media_urls: params.mediaUrls ?? null,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      // Duplicate MessageSid; return the existing row.
+      if (error.code === "23505" && params.twilioMessageSid) {
+        const existing = await db
+          .from("messages")
+          .select("*")
+          .eq("twilio_message_sid", params.twilioMessageSid)
+          .single();
+        if (existing.error) throw existing.error;
+        return existing.data as Message;
+      }
+      throw error;
+    }
+    return data as Message;
+  }
+
+  async listDueAckThreads(now: string, limit = 100): Promise<CallRequest[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("requests")
+      .select("*")
+      .not("ack_due_at", "is", null)
+      .is("ack_sent_at", null)
+      .lte("ack_due_at", now)
+      .order("ack_due_at", { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as CallRequest[];
+  }
+
+  async armAck(businessId: string, requestId: string, dueAt: string): Promise<void> {
+    const db = getAdminClient();
+    const { error } = await db
+      .from("requests")
+      .update({ ack_due_at: dueAt })
+      .eq("business_id", businessId)
+      .eq("id", requestId)
+      .is("ack_sent_at", null);
+    if (error) throw error;
+  }
+
+  async markAckSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("requests")
+      .update({ ack_sent_at: sentAt, ack_due_at: null })
+      .eq("business_id", businessId)
+      .eq("id", requestId)
+      .is("ack_sent_at", null)
+      .select("id");
+    if (error) throw error;
+    return (data?.length ?? 0) > 0;
   }
 }

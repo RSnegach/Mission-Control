@@ -1,4 +1,5 @@
 import { getPrimaryBusiness, getSettings } from "@/lib/data";
+import { DEFAULT_FOLLOWUP_TEMPLATE, DEFAULT_ACK_TEMPLATE } from "@/lib/template";
 import { PageHeader } from "@/components/PageHeader";
 import { Empty } from "@/components/Section";
 import { SettingsForm } from "@/components/SettingsForm";
@@ -26,8 +27,10 @@ export default async function SettingsPage() {
         action={saveSettings}
         businessName={business.name}
         enabled={settings?.sms_followup_enabled ?? true}
-        template={settings?.sms_followup_template ?? ""}
+        template={settings?.sms_followup_template ?? DEFAULT_FOLLOWUP_TEMPLATE}
         defaultRoutePhone={settings?.default_route_phone ?? ""}
+        ackEnabled={settings?.ack_enabled ?? true}
+        ackTemplate={settings?.ack_template ?? DEFAULT_ACK_TEMPLATE}
       />
     </>
   );

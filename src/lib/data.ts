@@ -131,7 +131,11 @@ export function updateSettings(
   patch: Partial<
     Pick<
       BusinessSettings,
-      "default_route_phone" | "sms_followup_enabled" | "sms_followup_template"
+      | "default_route_phone"
+      | "sms_followup_enabled"
+      | "sms_followup_template"
+      | "ack_enabled"
+      | "ack_template"
     >
   >,
 ): Promise<BusinessSettings | null> {
@@ -157,4 +161,34 @@ export function updateContactName(
   name: string | null,
 ): Promise<Contact | null> {
   return getBackend().updateContactName(businessId, contactId, name);
+}
+
+export function createInboundMessage(params: {
+  businessId: string;
+  contactId: string | null;
+  requestId: string | null;
+  fromNumber: string;
+  toNumber: string;
+  body: string;
+  status?: string;
+  twilioMessageSid?: string | null;
+  mediaUrls?: string[] | null;
+}): Promise<Message> {
+  return getBackend().createInboundMessage(params);
+}
+
+export function listDueAckThreads(now: string, limit = 100): Promise<CallRequest[]> {
+  return getBackend().listDueAckThreads(now, limit);
+}
+
+export function armAck(businessId: string, requestId: string, dueAt: string): Promise<void> {
+  return getBackend().armAck(businessId, requestId, dueAt);
+}
+
+export function markAckSent(
+  businessId: string,
+  requestId: string,
+  sentAt: string,
+): Promise<boolean> {
+  return getBackend().markAckSent(businessId, requestId, sentAt);
 }

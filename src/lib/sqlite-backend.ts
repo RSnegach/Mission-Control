@@ -115,6 +115,8 @@ function bootstrapSchema(db: SqliteDB): void {
       callback_sla_minutes integer,
       sms_followup_enabled integer not null default 1,
       sms_followup_template text,
+      ack_enabled integer not null default 1,
+      ack_template text,
       created_at text not null,
       updated_at text not null,
       unique (business_id)
@@ -172,6 +174,8 @@ function bootstrapSchema(db: SqliteDB): void {
       due_at text,
       description text,
       source text,
+      ack_due_at text,
+      ack_sent_at text,
       created_at text not null,
       updated_at text not null
     );
@@ -208,6 +212,26 @@ function bootstrapSchema(db: SqliteDB): void {
     create index if not exists idx_messages_contact on messages(business_id, contact_id, created_at);
     create index if not exists idx_messages_request on messages(business_id, request_id, created_at);
   `);
+
+  // Upgrade a pre-existing DB: `create table if not exists` will not add new
+  // columns, so add them idempotently (duplicate-column errors are ignored).
+  addColumnIfMissing(db, "business_settings", "ack_enabled", "integer not null default 1");
+  addColumnIfMissing(db, "business_settings", "ack_template", "text");
+  addColumnIfMissing(db, "requests", "ack_due_at", "text");
+  addColumnIfMissing(db, "requests", "ack_sent_at", "text");
+
+  db.exec(`
+    create index if not exists idx_requests_ack_due
+      on requests(business_id, ack_due_at) where ack_due_at is not null and ack_sent_at is null;
+  `);
+}
+
+function addColumnIfMissing(db: SqliteDB, table: string, column: string, decl: string): void {
+  try {
+    db.exec(`alter table ${table} add column ${column} ${decl}`);
+  } catch {
+    // Column already exists; ignore.
+  }
 }
 
 // --- row mappers ------------------------------------------------------------
@@ -236,6 +260,8 @@ function mapSettings(r: Record<string, unknown>): BusinessSettings {
         : Number(r.callback_sla_minutes),
     sms_followup_enabled: r.sms_followup_enabled === 1 || r.sms_followup_enabled === true,
     sms_followup_template: (r.sms_followup_template as string) ?? null,
+    ack_enabled: r.ack_enabled === 1 || r.ack_enabled === true,
+    ack_template: (r.ack_template as string) ?? null,
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
   };
@@ -291,6 +317,8 @@ function mapRequest(r: Record<string, unknown>): CallRequest {
     due_at: (r.due_at as string) ?? null,
     description: (r.description as string) ?? null,
     source: (r.source as string) ?? null,
+    ack_due_at: (r.ack_due_at as string) ?? null,
+    ack_sent_at: (r.ack_sent_at as string) ?? null,
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
   };
@@ -575,16 +603,30 @@ export class SqliteBackend implements DataBackend {
   async updateSettings(
     businessId: string,
     patch: Partial<
-      Pick<BusinessSettings, "default_route_phone" | "sms_followup_enabled" | "sms_followup_template">
+      Pick<
+        BusinessSettings,
+        | "default_route_phone"
+        | "sms_followup_enabled"
+        | "sms_followup_template"
+        | "ack_enabled"
+        | "ack_template"
+      >
     >,
   ): Promise<BusinessSettings | null> {
-    const allowed = new Set(["default_route_phone", "sms_followup_enabled", "sms_followup_template"]);
+    const allowed = new Set([
+      "default_route_phone",
+      "sms_followup_enabled",
+      "sms_followup_template",
+      "ack_enabled",
+      "ack_template",
+    ]);
+    const boolCols = new Set(["sms_followup_enabled", "ack_enabled"]);
     const cols: string[] = [];
     const vals: unknown[] = [];
     for (const [k, v] of Object.entries(patch)) {
       if (!allowed.has(k)) continue;
       cols.push(`${k} = ?`);
-      vals.push(k === "sms_followup_enabled" ? (v ? 1 : 0) : v);
+      vals.push(boolCols.has(k) ? (v ? 1 : 0) : v);
     }
     if (cols.length === 0) return this.getSettings(businessId);
     cols.push("updated_at = ?");
@@ -633,6 +675,75 @@ export class SqliteBackend implements DataBackend {
       contactId,
     ]);
     return row ? mapContact(row) : null;
+  }
+
+  async createInboundMessage(params: {
+    businessId: string;
+    contactId: string | null;
+    requestId: string | null;
+    fromNumber: string;
+    toNumber: string;
+    body: string;
+    status?: string;
+    twilioMessageSid?: string | null;
+    mediaUrls?: string[] | null;
+  }): Promise<Message> {
+    if (params.twilioMessageSid) {
+      const existing = get(`select * from messages where twilio_message_sid = ?`, [
+        params.twilioMessageSid,
+      ]);
+      if (existing) return mapMessage(existing);
+    }
+    const id = newId("msg");
+    try {
+      run(
+        `insert into messages (id, business_id, contact_id, request_id, twilio_message_sid,
+           direction, from_number, to_number, body, status, media_urls, created_at)
+         values (?, ?, ?, ?, ?, 'inbound', ?, ?, ?, ?, ?, ?)`,
+        [
+          id, params.businessId, params.contactId, params.requestId, params.twilioMessageSid ?? null,
+          params.fromNumber, params.toNumber, params.body, params.status ?? "received",
+          params.mediaUrls ? JSON.stringify(params.mediaUrls) : null, nowIso(),
+        ],
+      );
+    } catch {
+      // Duplicate MessageSid race; return the existing row.
+      if (params.twilioMessageSid) {
+        const existing = get(`select * from messages where twilio_message_sid = ?`, [
+          params.twilioMessageSid,
+        ]);
+        if (existing) return mapMessage(existing);
+      }
+      throw new Error("inbound message insert failed");
+    }
+    return mapMessage(get(`select * from messages where id = ?`, [id])!);
+  }
+
+  async listDueAckThreads(now: string, limit = 100): Promise<CallRequest[]> {
+    return all(
+      `select * from requests
+        where ack_due_at is not null and ack_sent_at is null and ack_due_at <= ?
+        order by ack_due_at asc limit ?`,
+      [now, limit],
+    ).map(mapRequest);
+  }
+
+  async armAck(businessId: string, requestId: string, dueAt: string): Promise<void> {
+    run(
+      `update requests set ack_due_at = ?, updated_at = ?
+        where business_id = ? and id = ? and ack_sent_at is null`,
+      [dueAt, nowIso(), businessId, requestId],
+    );
+  }
+
+  async markAckSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+    const res = handle()
+      .prepare(
+        `update requests set ack_sent_at = ?, ack_due_at = null, updated_at = ?
+          where business_id = ? and id = ? and ack_sent_at is null`,
+      )
+      .run(sentAt, nowIso(), businessId, requestId);
+    return Number(res.changes) > 0;
   }
 }
 
@@ -757,12 +868,13 @@ function seedIfEmpty(db: SqliteDB): void {
     tx.prepare(
       `insert into business_settings (id, business_id, default_route_phone, voicemail_greeting,
          after_hours_behavior, dial_timeout_seconds, callback_sla_minutes, sms_followup_enabled,
-         sms_followup_template, created_at, updated_at)
-       values (?, ?, ?, ?, 'voicemail', 20, 60, 1, ?, ?, ?)`,
+         sms_followup_template, ack_enabled, ack_template, created_at, updated_at)
+       values (?, ?, ?, ?, 'voicemail', 20, 60, 1, ?, 1, ?, ?, ?)`,
     ).run(
       "set_demo", businessId, route,
       "Thanks for calling Demo Marine Repair. Please leave a message after the beep.",
       "Hi {name}, this is {business}. Sorry we missed your call. Drop a quick description of what we can help you with and we'll get back to you as soon as possible.",
+      "Thanks {name}, this is {business}. We've received your message and will get back to you very soon.",
       now, now,
     );
 
