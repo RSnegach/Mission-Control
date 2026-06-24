@@ -77,6 +77,12 @@ export interface DataBackend {
     status?: string;
     twilioMessageSid?: string | null;
   }): Promise<Message>;
+  /** Set (or clear, with null) a contact's display name. Tenant-scoped. */
+  updateContactName(
+    businessId: string,
+    contactId: string,
+    name: string | null,
+  ): Promise<Contact | null>;
 }
 
 /**

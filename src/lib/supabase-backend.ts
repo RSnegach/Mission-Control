@@ -462,4 +462,21 @@ export class SupabaseBackend implements DataBackend {
     if (error) throw error;
     return data as Message;
   }
+
+  async updateContactName(
+    businessId: string,
+    contactId: string,
+    name: string | null,
+  ): Promise<Contact | null> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("contacts")
+      .update({ name })
+      .eq("business_id", businessId)
+      .eq("id", contactId)
+      .select("*")
+      .maybeSingle();
+    if (error) throw error;
+    return (data as Contact) ?? null;
+  }
 }

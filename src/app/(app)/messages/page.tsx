@@ -39,6 +39,7 @@ export default async function MessagesPage() {
     return {
       contactId,
       name: contact?.name || contact?.phone || "Unknown caller",
+      contactName: contact?.name ?? null,
       phone: contact?.phone ?? null,
       msgs,
       last,

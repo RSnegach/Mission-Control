@@ -150,3 +150,11 @@ export function createOutboundMessage(params: {
 }): Promise<Message> {
   return getBackend().createOutboundMessage(params);
 }
+
+export function updateContactName(
+  businessId: string,
+  contactId: string,
+  name: string | null,
+): Promise<Contact | null> {
+  return getBackend().updateContactName(businessId, contactId, name);
+}

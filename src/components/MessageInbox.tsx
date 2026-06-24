@@ -1,15 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import type { Message } from "@/lib/types";
 import { formatTime } from "@/lib/format";
 import { MessageThread } from "./MessageThread";
+import { EditableName } from "./EditableName";
 import { colors, card } from "./ui";
 
 export interface ThreadView {
   contactId: string;
-  name: string;
+  name: string; // display fallback (name or phone or "Unknown caller")
+  contactName: string | null; // the editable contact name (null = unnamed)
   phone: string | null;
   msgs: Message[];
   last: Message;
@@ -106,12 +107,16 @@ export function MessageInbox({
                   marginBottom: 12,
                 }}
               >
-                <Link
-                  href={`/clients/${t.contactId}`}
-                  style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600, fontSize: 15 }}
-                >
-                  {t.name}
-                </Link>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 600 }}>
+                  <EditableName
+                    contactId={t.contactId}
+                    name={t.contactName}
+                    href={`/clients/${t.contactId}`}
+                  />
+                  {t.phone ? (
+                    <span style={{ color: colors.muted, fontSize: 12, fontWeight: 400 }}>{t.phone}</span>
+                  ) : null}
+                </span>
                 <span style={{ color: colors.muted, fontSize: 12 }}>
                   {formatTime(t.last.created_at, timezone)}
                 </span>

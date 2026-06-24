@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { Table, Th } from "./Table";
+import { EditableName } from "./EditableName";
 import { formatTime } from "@/lib/format";
 import { colors, rowBorder } from "./ui";
 
@@ -36,14 +36,20 @@ export function ClientTable({
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
+  // Local name overrides so an inline rename updates search/sort without a reload.
+  const [names, setNames] = useState<Record<string, string | null>>({});
+
+  const effectiveName = (c: ClientView) =>
+    c.id in names ? names[c.id] : c.name;
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const withNames = clients.map((c) => ({ ...c, name: effectiveName(c) }));
     const filtered = q
-      ? clients.filter((c) =>
+      ? withNames.filter((c) =>
           `${c.name ?? ""} ${c.phone ?? ""}`.toLowerCase().includes(q),
         )
-      : clients.slice();
+      : withNames.slice();
 
     filtered.sort((a, b) => {
       switch (sort) {
@@ -60,7 +66,8 @@ export function ClientTable({
       }
     });
     return filtered;
-  }, [clients, query, sort]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, query, sort, names]);
 
   return (
     <div>
@@ -136,9 +143,12 @@ export function ClientTable({
             rows.map((c) => (
               <tr key={c.id} style={rowBorder}>
                 <td style={td}>
-                  <Link href={`/clients/${c.id}`} style={linkStyle}>
-                    {c.name || "Unnamed caller"}
-                  </Link>
+                  <EditableName
+                    contactId={c.id}
+                    name={c.name}
+                    href={`/clients/${c.id}`}
+                    onSaved={(n) => setNames((prev) => ({ ...prev, [c.id]: n }))}
+                  />
                 </td>
                 <td style={{ ...td, color: colors.muted }}>{c.phone || "—"}</td>
                 <td style={{ ...td, textAlign: "right" }}>{c.callCount}</td>
@@ -163,4 +173,3 @@ export function ClientTable({
 }
 
 const td: React.CSSProperties = { padding: "10px 12px", fontSize: 14 };
-const linkStyle: React.CSSProperties = { color: "var(--accent)", textDecoration: "none", fontWeight: 500 };

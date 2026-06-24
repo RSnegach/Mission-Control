@@ -616,6 +616,24 @@ export class SqliteBackend implements DataBackend {
     );
     return mapMessage(get(`select * from messages where id = ?`, [id])!);
   }
+
+  async updateContactName(
+    businessId: string,
+    contactId: string,
+    name: string | null,
+  ): Promise<Contact | null> {
+    run(`update contacts set name = ?, updated_at = ? where business_id = ? and id = ?`, [
+      name,
+      nowIso(),
+      businessId,
+      contactId,
+    ]);
+    const row = get(`select * from contacts where business_id = ? and id = ?`, [
+      businessId,
+      contactId,
+    ]);
+    return row ? mapContact(row) : null;
+  }
 }
 
 // --- backfill seed ----------------------------------------------------------

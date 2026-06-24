@@ -474,4 +474,17 @@ export class MockBackend implements DataBackend {
     s.messages.push(msg);
     return msg;
   }
+
+  async updateContactName(
+    businessId: string,
+    contactId: string,
+    name: string | null,
+  ): Promise<Contact | null> {
+    const s = store();
+    const c = s.contacts.find((x) => x.business_id === businessId && x.id === contactId);
+    if (!c) return null;
+    c.name = name;
+    c.updated_at = new Date().toISOString();
+    return c;
+  }
 }
