@@ -81,3 +81,20 @@ export interface CallRequest {
   created_at: string;
   updated_at: string;
 }
+
+export interface Message {
+  id: string;
+  business_id: string;
+  // MVP collapses clients into contacts, so contact_id alone identifies the
+  // other party. client_id is omitted until clients become a distinct entity.
+  contact_id: string | null;
+  request_id: string | null; // links an automated text to the missed-call request
+  twilio_message_sid: string | null;
+  direction: "inbound" | "outbound"; // outbound = we texted them; inbound = their reply
+  from_number: string | null;
+  to_number: string | null;
+  body: string;
+  status: string; // queued | sent | delivered | received | failed
+  media_urls: string[] | null;
+  created_at: string;
+}

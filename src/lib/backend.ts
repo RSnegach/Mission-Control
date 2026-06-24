@@ -1,4 +1,4 @@
-import type { Business, BusinessSettings, Call, CallRequest, Contact } from "./types";
+import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
 import { MockBackend } from "./mock-backend";
 import { SupabaseBackend } from "./supabase-backend";
 
@@ -40,6 +40,22 @@ export interface DataBackend {
   listMissedRequests(businessId: string, limit?: number): Promise<CallRequest[]>;
   getPrimaryBusiness(): Promise<Business | null>;
   getContactsByIds(businessId: string, ids: string[]): Promise<Map<string, Contact>>;
+
+  // --- Messages (SMS) ---
+  // Thread reads sort ascending (oldest first) so conversations read top to bottom.
+  listMessagesByContact(businessId: string, contactId: string, limit?: number): Promise<Message[]>;
+  listMessagesByRequest(businessId: string, requestId: string): Promise<Message[]>;
+  listMessagesByCall(businessId: string, callId: string): Promise<Message[]>;
+  // List read sorts descending (newest first).
+  listRecentMessages(businessId: string, limit?: number): Promise<Message[]>;
+
+  // --- Contacts / clients ---
+  getContactById(businessId: string, contactId: string): Promise<Contact | null>;
+  listContacts(businessId: string, limit?: number): Promise<Contact[]>;
+
+  // --- Per-contact history ---
+  listCallsByContact(businessId: string, contactId: string, limit?: number): Promise<Call[]>;
+  listRequestsByContact(businessId: string, contactId: string, limit?: number): Promise<CallRequest[]>;
 }
 
 /** True when the app should run entirely on mock data, with no Supabase/Twilio. */

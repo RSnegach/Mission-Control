@@ -1,7 +1,7 @@
 import { getAdminClient } from "./supabase";
 import { toE164 } from "./phone";
 import type { DataBackend } from "./backend";
-import type { Business, BusinessSettings, Call, CallRequest, Contact } from "./types";
+import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
 
 /**
  * Real backend: Postgres via supabase-js. Used when MOCK_MODE !== "true".
@@ -294,5 +294,119 @@ export class SupabaseBackend implements DataBackend {
     if (error) throw error;
     for (const c of (data ?? []) as Contact[]) map.set(c.id, c);
     return map;
+  }
+
+  // --- Messages --- (requires a `messages` table; added in a later MVP migration)
+  async listMessagesByContact(businessId: string, contactId: string, limit = 200): Promise<Message[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("messages")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Message[];
+  }
+
+  async listMessagesByRequest(businessId: string, requestId: string): Promise<Message[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("messages")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as Message[];
+  }
+
+  async listMessagesByCall(businessId: string, callId: string): Promise<Message[]> {
+    const call = await this.getCallById(businessId, callId);
+    if (!call) return [];
+    if (call.created_request_id) {
+      const byReq = await this.listMessagesByRequest(businessId, call.created_request_id);
+      if (byReq.length) return byReq;
+    }
+    if (call.contact_id) return this.listMessagesByContact(businessId, call.contact_id);
+    return [];
+  }
+
+  async listRecentMessages(businessId: string, limit = 200): Promise<Message[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("messages")
+      .select("*")
+      .eq("business_id", businessId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Message[];
+  }
+
+  // --- Contacts / clients ---
+  async getContactById(businessId: string, contactId: string): Promise<Contact | null> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("contacts")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("id", contactId)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as Contact) ?? null;
+  }
+
+  async listContacts(businessId: string, limit = 200): Promise<Contact[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("contacts")
+      .select("*")
+      .eq("business_id", businessId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Contact[];
+  }
+
+  // --- Per-contact history ---
+  async listCallsByContact(businessId: string, contactId: string, limit = 100): Promise<Call[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("calls")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Call[];
+  }
+
+  async listRequestsByContact(businessId: string, contactId: string, limit = 100): Promise<CallRequest[]> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("requests")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []) as CallRequest[];
+  }
+
+  // Internal: fetch a single call by id (used by listMessagesByCall).
+  private async getCallById(businessId: string, callId: string): Promise<Call | null> {
+    const db = getAdminClient();
+    const { data, error } = await db
+      .from("calls")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("id", callId)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as Call) ?? null;
   }
 }

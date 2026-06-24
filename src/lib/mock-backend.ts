@@ -1,6 +1,6 @@
 import { toE164 } from "./phone";
 import type { DataBackend } from "./backend";
-import type { Business, BusinessSettings, Call, CallRequest, Contact } from "./types";
+import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
 
 /**
  * In-memory backend for MOCK_MODE. No Supabase, no Twilio, no credentials.
@@ -21,6 +21,7 @@ interface MockStore {
   contacts: Contact[];
   calls: Call[];
   requests: CallRequest[];
+  messages: Message[];
   events: { id: string; business_id: string | null; call_id: string | null; event_type: string; payload_json: unknown; created_at: string }[];
   seq: number;
 }
@@ -87,6 +88,26 @@ function seed(): MockStore {
     if (c) c.created_request_id = r.id;
   }
 
+  // SMS threads for the missed calls: an automated "sorry we missed you" text and
+  // the caller's replies. Three states: 2 replies, 1 reply, and 0 replies (texted,
+  // no answer yet). Anchored by request_id; from/to relative to the Twilio number tn.
+  const AUTO_TEXT =
+    "Hi, this is Demo Marine Repair. Sorry we missed your call. How can we help?";
+
+  const messages: Message[] = [
+    // req_1 / call_2 -> Smith LLC (+13215550144): auto-text + 2 replies
+    mkMsg({ id: "msg_1", businessId, contactId: "con_2", requestId: "req_1", dir: "outbound", from: tn, to: "+13215550144", body: AUTO_TEXT, status: "delivered", minsAgo: 139 }),
+    mkMsg({ id: "msg_2", businessId, contactId: "con_2", requestId: "req_1", dir: "inbound", from: "+13215550144", to: tn, body: "Hey, my boat's inboard is overheating. Need a diagnostic this week.", status: "received", minsAgo: 135 }),
+    mkMsg({ id: "msg_3", businessId, contactId: "con_2", requestId: "req_1", dir: "inbound", from: "+13215550144", to: tn, body: "It's a 2019 Sea Ray. Can someone call me back today?", status: "received", minsAgo: 134 }),
+
+    // req_2 / call_3 -> (+14075558831): auto-text + 1 reply
+    mkMsg({ id: "msg_4", businessId, contactId: "con_3", requestId: "req_2", dir: "outbound", from: tn, to: "+14075558831", body: AUTO_TEXT, status: "delivered", minsAgo: 94 }),
+    mkMsg({ id: "msg_5", businessId, contactId: "con_3", requestId: "req_2", dir: "inbound", from: "+14075558831", to: tn, body: "Looking for a quote to winterize two outboards.", status: "received", minsAgo: 90 }),
+
+    // req_3 / call_5 -> ABC Marine (+14075550123): auto-text + 0 replies
+    mkMsg({ id: "msg_6", businessId, contactId: "con_1", requestId: "req_3", dir: "outbound", from: tn, to: "+14075550123", body: AUTO_TEXT, status: "delivered", minsAgo: 24 }),
+  ];
+
   return {
     businesses: [business],
     settings: [settings],
@@ -94,8 +115,30 @@ function seed(): MockStore {
     contacts,
     calls,
     requests,
+    messages,
     events: [],
     seq: 1000,
+  };
+}
+
+function mkMsg(p: {
+  id: string; businessId: string; contactId: string | null; requestId: string | null;
+  dir: "inbound" | "outbound"; from: string; to: string; body: string; status: string; minsAgo: number;
+}): Message {
+  const at = minutesAgo(p.minsAgo);
+  return {
+    id: p.id,
+    business_id: p.businessId,
+    contact_id: p.contactId,
+    request_id: p.requestId,
+    twilio_message_sid: `SM_demo_${p.id}`,
+    direction: p.dir,
+    from_number: p.from,
+    to_number: p.to,
+    body: p.body,
+    status: p.status,
+    media_urls: null,
+    created_at: at,
   };
 }
 
@@ -318,5 +361,71 @@ export class MockBackend implements DataBackend {
       if (c.business_id === businessId && unique.has(c.id)) map.set(c.id, c);
     }
     return map;
+  }
+
+  // --- Messages ---
+  private threadAsc(msgs: Message[]): Message[] {
+    return msgs.slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  async listMessagesByContact(businessId: string, contactId: string, limit = 200): Promise<Message[]> {
+    return this.threadAsc(
+      store().messages.filter((m) => m.business_id === businessId && m.contact_id === contactId),
+    ).slice(0, limit);
+  }
+
+  async listMessagesByRequest(businessId: string, requestId: string): Promise<Message[]> {
+    return this.threadAsc(
+      store().messages.filter((m) => m.business_id === businessId && m.request_id === requestId),
+    );
+  }
+
+  async listMessagesByCall(businessId: string, callId: string): Promise<Message[]> {
+    const s = store();
+    const call = s.calls.find((c) => c.business_id === businessId && c.id === callId);
+    if (!call) return [];
+    // Prefer the linked request's thread; fall back to the contact's messages.
+    if (call.created_request_id) {
+      const byReq = await this.listMessagesByRequest(businessId, call.created_request_id);
+      if (byReq.length) return byReq;
+    }
+    if (call.contact_id) return this.listMessagesByContact(businessId, call.contact_id);
+    return [];
+  }
+
+  async listRecentMessages(businessId: string, limit = 200): Promise<Message[]> {
+    return store()
+      .messages.filter((m) => m.business_id === businessId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  // --- Contacts / clients ---
+  async getContactById(businessId: string, contactId: string): Promise<Contact | null> {
+    return (
+      store().contacts.find((c) => c.business_id === businessId && c.id === contactId) ?? null
+    );
+  }
+
+  async listContacts(businessId: string, limit = 200): Promise<Contact[]> {
+    return store()
+      .contacts.filter((c) => c.business_id === businessId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  // --- Per-contact history ---
+  async listCallsByContact(businessId: string, contactId: string, limit = 100): Promise<Call[]> {
+    return store()
+      .calls.filter((c) => c.business_id === businessId && c.contact_id === contactId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  async listRequestsByContact(businessId: string, contactId: string, limit = 100): Promise<CallRequest[]> {
+    return store()
+      .requests.filter((r) => r.business_id === businessId && r.contact_id === contactId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
   }
 }

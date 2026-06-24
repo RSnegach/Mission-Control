@@ -39,6 +39,18 @@ have that file, create it (or copy `.env.example` to `.env.local`) with one line
 MOCK_MODE=true
 ```
 
+### Pages
+
+The app has a persistent left sidebar across these tabs:
+
+- **Dashboard** — stat cards (calls today, missed, answered rate, open callbacks) plus charts: calls by hour, answered vs missed (donut), calls per day.
+- **Calls** — full call log with status filter and caller search. Each row expands to show the automated text follow-up, the caller's replies, the call timeline, the linked request, and a link to the client.
+- **Clients** — every caller as a client record with call and message counts; click through to a profile showing call history, open requests, and the full message thread.
+- **Requests** — the open callback queue with priority and overdue flagging.
+- **Messages** — recent SMS conversations grouped by client.
+
+The landing page at `/` stays outside the app shell (no sidebar).
+
 ### Exercise the webhooks without a phone
 
 The webhooks are plain POST endpoints. Drive them with curl while `npm run dev` runs:
@@ -55,9 +67,9 @@ curl -X POST http://localhost:3000/api/twilio/voice/dial-result \
   --data "CallSid=CA_demo_test_1&DialCallStatus=no-answer"
 ```
 
-Reload `/dashboard`: the new caller appears in recent calls as **Missed** and a new
-**Missed call callback** is in the queue. `DialCallStatus=completed&DialCallDuration=42`
-instead marks it **Answered** with a 0:42 duration.
+Reload `/calls`: the new caller appears as **Missed** and a new **Missed call callback**
+is in the **Requests** queue. `DialCallStatus=completed&DialCallDuration=42` instead
+marks it **Answered** with a 0:42 duration.
 
 Mock state lives in memory for the dev process. It survives hot-reload but resets when
 you restart `npm run dev`. The seeded number to call is `+13215550100`.
@@ -89,26 +101,44 @@ Supabase and Twilio vars below.
 ```
 src/
   app/
-    page.tsx                              landing
-    dashboard/page.tsx                    calls + callback queue
+    page.tsx                              landing (no sidebar)
+    (app)/                                route group: shared sidebar shell
+      layout.tsx                          Sidebar + content area
+      dashboard/page.tsx                  stats + charts
+      calls/page.tsx                      call log with expandable rows
+      clients/page.tsx                    client list
+      clients/[id]/page.tsx               client profile + timeline
+      requests/page.tsx                   callback queue
+      messages/page.tsx                   SMS conversations
     api/twilio/voice/
       incoming/route.ts                   POST: log call, return Dial TwiML
       dial-result/route.ts                POST: update status, create missed request
+  components/
+    Sidebar.tsx                           nav (client)
+    PageHeader, StatCard, Section, Table, Badge   shared primitives
+    CallLog.tsx, CallRow.tsx              filterable log + expandable row (client)
+    MessageThread.tsx, CallTimeline.tsx   SMS bubbles, call timeline
+    charts/                               Recharts client components
   lib/
     backend.ts                            DataBackend interface + getBackend() selector
     mock-backend.ts                       in-memory seeded backend (MOCK_MODE=true)
     supabase-backend.ts                   real Postgres backend (MOCK_MODE=false)
     data.ts                               facade: delegates to the active backend
+    analytics.ts                          pure aggregation for charts/grouping
     supabase.ts                           server-only admin client
     twilio.ts                             signature validation, TwiML builders
     phone.ts                              E.164 normalization
-    format.ts                             dashboard formatting
-    types.ts                              row types
+    format.ts                             formatting helpers
+    types.ts                              row types (incl. Message)
 supabase/
   migrations/0001_init.sql                schema + indexes + triggers
   seed.sql                                one demo business + number + settings
 .env.example
 ```
+
+Note: the `messages` SMS data is mock-only for now. The `Message` type and backend
+reads exist, and `SupabaseBackend` has matching queries, but a `messages` table
+migration is a later step before mock mode is turned off.
 
 ## Going live with real services
 
