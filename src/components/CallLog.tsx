@@ -3,25 +3,46 @@
 import { useMemo, useState } from "react";
 import { Table, Th } from "./Table";
 import { CallRow, type CallView } from "./CallRow";
+import { hourOf } from "@/lib/analytics";
 import { colors } from "./ui";
 
 type StatusFilter = "all" | "answered" | "missed";
 
-/** Filterable, searchable call log of expandable rows. Data is pre-enriched server-side. */
-export function CallLog({ views, timezone }: { views: CallView[]; timezone: string }) {
-  const [status, setStatus] = useState<StatusFilter>("all");
+/**
+ * Filterable, searchable call log of expandable rows. Data is pre-enriched
+ * server-side. initialStatus/initialHour seed the filters for drill-down from the
+ * dashboard (e.g. /calls?status=missed or ?hour=14).
+ */
+export function CallLog({
+  views,
+  timezone,
+  initialStatus = "all",
+  initialHour = null,
+}: {
+  views: CallView[];
+  timezone: string;
+  initialStatus?: StatusFilter;
+  initialHour?: number | null;
+}) {
+  const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [query, setQuery] = useState("");
+  // Hour filter is drill-down-only (set via URL); cleared by the user with a chip.
+  const [hour, setHour] = useState<number | null>(initialHour);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return views.filter((v) => {
       if (status === "answered" && v.call.status !== "answered") return false;
       if (status === "missed" && v.call.status !== "missed") return false;
+      if (hour !== null) {
+        const iso = v.call.created_at ?? v.call.started_at;
+        if (!iso || hourOf(iso, timezone) !== hour) return false;
+      }
       if (!q) return true;
       const hay = `${v.contact?.name ?? ""} ${v.call.from_number ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [views, status, query]);
+  }, [views, status, query, hour, timezone]);
 
   return (
     <div>
@@ -62,6 +83,27 @@ export function CallLog({ views, timezone }: { views: CallView[]; timezone: stri
             outline: "none",
           }}
         />
+        {hour !== null ? (
+          <button
+            onClick={() => setHour(null)}
+            title="Clear hour filter"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 10px",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              border: `1px solid var(--accent)`,
+              background: "color-mix(in srgb, var(--accent) 14%, var(--card))",
+              color: "var(--accent)",
+            }}
+          >
+            {hourLabel(hour)} ✕
+          </button>
+        ) : null}
         <span style={{ color: colors.muted, fontSize: 12 }}>
           {filtered.length} of {views.length}
         </span>
@@ -92,4 +134,10 @@ export function CallLog({ views, timezone }: { views: CallView[]; timezone: stri
       </Table>
     </div>
   );
+}
+
+function hourLabel(h: number): string {
+  if (h === 0) return "12am";
+  if (h === 12) return "12pm";
+  return h < 12 ? `${h}am` : `${h - 12}pm`;
 }

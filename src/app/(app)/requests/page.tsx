@@ -1,9 +1,11 @@
 import Link from "next/link";
 import {
   getPrimaryBusiness,
+  getSettings,
   listMissedRequests,
   getContactsByIds,
 } from "@/lib/data";
+import { slaBuckets, type SlaBucket } from "@/lib/analytics";
 import { formatTime } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { Empty } from "@/components/Section";
@@ -13,7 +15,23 @@ import { colors, rowBorder } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function RequestsPage() {
+const BUCKET_LABEL: Record<SlaBucket, string> = {
+  overdue: "overdue",
+  dueSoon: "due soon",
+  onTrack: "on track",
+};
+
+export default async function RequestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ bucket?: string }>;
+}) {
+  const { bucket: bucketParam } = await searchParams;
+  const bucket: SlaBucket | null =
+    bucketParam === "overdue" || bucketParam === "dueSoon" || bucketParam === "onTrack"
+      ? bucketParam
+      : null;
+
   const business = await getPrimaryBusiness();
   if (!business) {
     return (
@@ -25,23 +43,43 @@ export default async function RequestsPage() {
   }
 
   const tz = business.timezone;
-  const requests = await listMissedRequests(business.id, 200);
+  const [allRequests, settings] = await Promise.all([
+    listMissedRequests(business.id, 200),
+    getSettings(business.id),
+  ]);
+  const slaMinutes = settings?.callback_sla_minutes ?? 60;
+
+  const now = Date.now();
+  // Order by urgency (most overdue first); filter to a bucket when requested.
+  const { items } = slaBuckets(allRequests, now, slaMinutes);
+  const shown = bucket ? items.filter((i) => i.bucket === bucket) : items;
+  const requests = shown.map((i) => i.request);
+
   const contactIds = requests
     .map((r) => r.contact_id)
     .filter((id): id is string => Boolean(id));
   const contacts = await getContactsByIds(business.id, contactIds);
 
-  const now = Date.now();
-
   return (
     <>
       <PageHeader
         title="Requests"
-        subtitle={`${requests.length} open callback${requests.length === 1 ? "" : "s"}`}
+        subtitle={
+          bucket
+            ? `${requests.length} ${BUCKET_LABEL[bucket]} callback${requests.length === 1 ? "" : "s"}`
+            : `${requests.length} open callback${requests.length === 1 ? "" : "s"}, most urgent first`
+        }
+        actions={
+          bucket ? (
+            <Link href="/requests" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 14 }}>
+              Show all
+            </Link>
+          ) : undefined
+        }
       />
 
       {requests.length === 0 ? (
-        <Empty text="No open requests." />
+        <Empty text={bucket ? `No ${BUCKET_LABEL[bucket]} callbacks.` : "No open requests."} />
       ) : (
         <Table>
           <thead>
@@ -78,7 +116,7 @@ export default async function RequestsPage() {
                   </Td>
                   <Td>{formatTime(r.created_at, tz)}</Td>
                   <Td>
-                    <span style={{ color: overdue ? "#ef4444" : colors.foreground }}>
+                    <span style={{ color: overdue ? colors.danger : colors.foreground }}>
                       {formatTime(r.due_at, tz)}
                       {overdue ? " · overdue" : ""}
                     </span>

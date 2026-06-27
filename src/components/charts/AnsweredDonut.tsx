@@ -8,8 +8,10 @@ import { tooltipProps } from "./tooltip";
 /** Answered vs missed donut. data: [{ name, value, color }] */
 export default function AnsweredDonut({
   data,
+  onSegmentClick,
 }: {
   data: { name: string; value: number; color: string }[];
+  onSegmentClick?: (name: string) => void;
 }) {
   const { palette: p } = useTheme();
   const total = data.reduce((sum, d) => sum + d.value, 0);
@@ -37,6 +39,10 @@ export default function AnsweredDonut({
             stroke={p.card}
             strokeWidth={2}
             isAnimationActive={false}
+            cursor={onSegmentClick ? "pointer" : undefined}
+            onClick={(slice: { name?: string }) => {
+              if (onSegmentClick && slice?.name) onSegmentClick(slice.name);
+            }}
           >
             {data.map((d) => (
               <Cell key={d.name} fill={d.color} />

@@ -1,5 +1,6 @@
 import {
   getPrimaryBusiness,
+  getSettings,
   listCalls,
   listMissedRequests,
   listRecentMessages,
@@ -22,10 +23,11 @@ export default async function DashboardPage() {
     );
   }
 
-  const [calls, missed, messages] = await Promise.all([
+  const [calls, missed, messages, settings] = await Promise.all([
     listCalls(business.id, 5000),
-    listMissedRequests(business.id, 100),
+    listMissedRequests(business.id, 200),
     listRecentMessages(business.id, 5000),
+    getSettings(business.id),
   ]);
 
   return (
@@ -34,7 +36,8 @@ export default async function DashboardPage() {
       <DashboardView
         calls={calls}
         messages={messages}
-        missedCount={missed.length}
+        requests={missed}
+        slaMinutes={settings?.callback_sla_minutes ?? null}
         timezone={business.timezone}
       />
     </>

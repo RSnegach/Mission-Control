@@ -13,7 +13,15 @@ import type { CallView } from "@/components/CallRow";
 
 export const dynamic = "force-dynamic";
 
-export default async function CallsPage() {
+export default async function CallsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; hour?: string }>;
+}) {
+  const { status, hour } = await searchParams;
+  const initialStatus =
+    status === "answered" || status === "missed" ? status : "all";
+  const initialHour = hour !== undefined ? Number.parseInt(hour, 10) : null;
   const business = await getPrimaryBusiness();
   if (!business) {
     return (
@@ -62,7 +70,12 @@ export default async function CallsPage() {
         title="Calls"
         subtitle="Every inbound call. Expand a row to see the text follow-up and timeline."
       />
-      <CallLog views={views} timezone={business.timezone} />
+      <CallLog
+        views={views}
+        timezone={business.timezone}
+        initialStatus={initialStatus}
+        initialHour={Number.isNaN(initialHour) ? null : initialHour}
+      />
     </>
   );
 }

@@ -376,3 +376,208 @@ export function computeMetricSeries(
     return row;
   });
 }
+
+// ===========================================================================
+// Dashboard overhaul: KPI deltas, sparklines, heatmap, recovery funnel, SLA,
+// metric presets, CSV. All pure over already-fetched arrays. No backend.
+// ===========================================================================
+
+/** The equal-length window immediately before a resolved range. */
+export function priorRange(r: ResolvedRange): { startMs: number; endMs: number } {
+  const span = r.endMs - r.startMs;
+  return { startMs: r.startMs - span, endMs: r.startMs };
+}
+
+export interface KpiDelta {
+  value: number;
+  prior: number;
+  pct: number | null; // null when prior is 0 (no baseline)
+  direction: "up" | "down" | "flat";
+}
+
+function makeDelta(value: number, prior: number): KpiDelta {
+  let direction: KpiDelta["direction"] = "flat";
+  if (value > prior) direction = "up";
+  else if (value < prior) direction = "down";
+  const pct = prior === 0 ? null : Math.round(((value - prior) / prior) * 100);
+  return { value, prior, pct, direction };
+}
+
+function callMs(c: Call): number | null {
+  const iso = c.created_at ?? c.started_at;
+  return iso ? new Date(iso).getTime() : null;
+}
+
+/** Range-aware KPIs (Calls, Missed, Answered rate) with prior-period deltas. */
+export function computeKpis(
+  calls: Call[],
+  r: ResolvedRange,
+): { total: KpiDelta; missed: KpiDelta; answerRate: KpiDelta } {
+  const prior = priorRange(r);
+  let curTotal = 0, curMissed = 0, curAnswered = 0;
+  let priTotal = 0, priMissed = 0, priAnswered = 0;
+
+  for (const c of calls) {
+    const t = callMs(c);
+    if (t === null) continue;
+    if (t >= r.startMs && t <= r.endMs) {
+      curTotal += 1;
+      if (c.status === "missed") curMissed += 1;
+      else if (c.status === "answered") curAnswered += 1;
+    } else if (t >= prior.startMs && t < prior.endMs) {
+      priTotal += 1;
+      if (c.status === "missed") priMissed += 1;
+      else if (c.status === "answered") priAnswered += 1;
+    }
+  }
+
+  const curRate = curAnswered + curMissed > 0 ? Math.round((curAnswered / (curAnswered + curMissed)) * 100) : 0;
+  const priRate = priAnswered + priMissed > 0 ? Math.round((priAnswered / (priAnswered + priMissed)) * 100) : 0;
+
+  return {
+    total: makeDelta(curTotal, priTotal),
+    missed: makeDelta(curMissed, priMissed),
+    answerRate: makeDelta(curRate, priRate),
+  };
+}
+
+/** Per-bucket series for one KPI across the current range (for sparklines). */
+export function kpiSparkline(
+  calls: Call[],
+  r: ResolvedRange,
+  tz: string,
+  metric: "calls" | "missed" | "answerRate",
+): number[] {
+  const n = r.buckets.length;
+  const total = new Array(n).fill(0);
+  const missed = new Array(n).fill(0);
+  const answered = new Array(n).fill(0);
+  for (const c of calls) {
+    const iso = c.created_at ?? c.started_at;
+    if (!iso) continue;
+    const i = bucketIndexFor(iso, r, tz);
+    if (i < 0) continue;
+    total[i] += 1;
+    if (c.status === "missed") missed[i] += 1;
+    else if (c.status === "answered") answered[i] += 1;
+  }
+  if (metric === "calls") return total;
+  if (metric === "missed") return missed;
+  return total.map((_, i) =>
+    answered[i] + missed[i] > 0 ? Math.round((answered[i] / (answered[i] + missed[i])) * 100) : 0,
+  );
+}
+
+/** Day-of-week (0=Sun..6=Sat) for an ISO timestamp in a timezone. */
+function dowOf(iso: string, tz: string): number {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(new Date(iso));
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[wd] ?? 0;
+}
+
+/** 7x24 grid (grid[dow][hour]) of call counts, plus the max for color scaling. */
+export function callsByHourAndDay(calls: Call[], tz: string): { grid: number[][]; max: number } {
+  const grid: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  let max = 0;
+  for (const c of calls) {
+    if (!c.created_at) continue;
+    const d = dowOf(c.created_at, tz);
+    const h = hourOf(c.created_at, tz);
+    const v = (grid[d][h] += 1);
+    if (v > max) max = v;
+  }
+  return { grid, max };
+}
+
+export interface RecoveryFunnelResult {
+  missed: number;
+  followedUp: number;
+  replied: number;
+  replyRate: number | null; // replied / followedUp
+}
+
+/** Missed-call recovery funnel over a range: missed -> texted -> replied. */
+export function recoveryFunnel(
+  calls: Call[],
+  messages: Message[],
+  r: ResolvedRange,
+): RecoveryFunnelResult {
+  // Request ids belonging to missed calls within the range.
+  const missedReqIds = new Set<string>();
+  let missed = 0;
+  for (const c of calls) {
+    const t = callMs(c);
+    if (t === null || t < r.startMs || t > r.endMs) continue;
+    if (c.status !== "missed") continue;
+    missed += 1;
+    if (c.created_request_id) missedReqIds.add(c.created_request_id);
+  }
+  const outboundReq = new Set<string>();
+  const inboundReq = new Set<string>();
+  for (const m of messages) {
+    if (!m.request_id || !missedReqIds.has(m.request_id)) continue;
+    if (m.direction === "outbound") outboundReq.add(m.request_id);
+    else inboundReq.add(m.request_id);
+  }
+  const followedUp = outboundReq.size;
+  let replied = 0;
+  for (const id of inboundReq) if (outboundReq.has(id)) replied += 1;
+  return {
+    missed,
+    followedUp,
+    replied,
+    replyRate: followedUp === 0 ? null : Math.round((replied / followedUp) * 100),
+  };
+}
+
+export type SlaBucket = "overdue" | "dueSoon" | "onTrack";
+export interface SlaItem {
+  request: CallRequest;
+  remainingMs: number;
+  bucket: SlaBucket;
+}
+
+/** Bucket open callback requests by urgency relative to now. Pure given now. */
+export function slaBuckets(
+  requests: CallRequest[],
+  now: number,
+  slaMinutes: number,
+  dueSoonMs = 30 * 60_000,
+): { counts: Record<SlaBucket, number>; items: SlaItem[] } {
+  const counts: Record<SlaBucket, number> = { overdue: 0, dueSoon: 0, onTrack: 0 };
+  const items: SlaItem[] = [];
+  for (const req of requests) {
+    if (req.status === "closed") continue;
+    const dueMs = req.due_at
+      ? new Date(req.due_at).getTime()
+      : new Date(req.created_at).getTime() + slaMinutes * 60_000;
+    const remainingMs = dueMs - now;
+    const bucket: SlaBucket = remainingMs < 0 ? "overdue" : remainingMs < dueSoonMs ? "dueSoon" : "onTrack";
+    counts[bucket] += 1;
+    items.push({ request: req, remainingMs, bucket });
+  }
+  items.sort((a, b) => a.remainingMs - b.remainingMs); // most urgent first
+  return { counts, items };
+}
+
+/** Named metric bundles for the Trends panel. "Custom" is a UI sentinel. */
+export const METRIC_PRESETS: { key: string; label: string; metrics: MetricKey[] }[] = [
+  { key: "default", label: "Default", metrics: ["calls", "missed", "missedResponded"] },
+  { key: "health", label: "Health", metrics: ["answerRate", "missed", "missedResponded"] },
+  { key: "volume", label: "Volume", metrics: ["calls", "answered", "missed"] },
+  { key: "engagement", label: "Engagement", metrics: ["followupsSent", "repliesReceived", "newCallers", "returningCallers"] },
+];
+
+/** Serialize computeMetricSeries rows to CSV text (CRLF, quoted as needed). */
+export function toCsv(rows: Array<Record<string, number | string>>): string {
+  if (rows.length === 0) return "";
+  const keys: string[] = ["label"];
+  for (const row of rows) for (const k of Object.keys(row)) if (!keys.includes(k)) keys.push(k);
+  const esc = (v: unknown): string => {
+    const s = String(v ?? "");
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [keys.join(",")];
+  for (const row of rows) lines.push(keys.map((k) => esc(row[k])).join(","));
+  return lines.join("\r\n");
+}
