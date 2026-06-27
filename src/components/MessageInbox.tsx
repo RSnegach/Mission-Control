@@ -5,6 +5,7 @@ import type { Message } from "@/lib/types";
 import { formatTime } from "@/lib/format";
 import { MessageThread } from "./MessageThread";
 import { EditableName } from "./EditableName";
+import { ReplyBox } from "./ReplyBox";
 import { colors, card } from "./ui";
 
 export interface ThreadView {
@@ -122,6 +123,7 @@ export function MessageInbox({
                 </span>
               </div>
               <MessageThread messages={t.msgs} timezone={timezone} />
+              <ReplyBox contactId={t.contactId} />
             </div>
           ))}
         </div>

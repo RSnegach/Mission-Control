@@ -1,6 +1,21 @@
-import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
+import type {
+  Activity,
+  Business,
+  BusinessSettings,
+  Call,
+  CallRequest,
+  Contact,
+  Message,
+  Tag,
+  Task,
+} from "./types";
 import { MockBackend } from "./mock-backend";
 import { SupabaseBackend } from "./supabase-backend";
+
+/** Mutable fields on a callback request. */
+export type RequestPatch = Partial<
+  Pick<CallRequest, "status" | "priority" | "due_at" | "description" | "scheduled_for">
+>;
 
 /**
  * Data backend adapter.
@@ -107,6 +122,70 @@ export interface DataBackend {
   armAck(businessId: string, requestId: string, dueAt: string): Promise<void>;
   /** Atomically claim+mark a request acked. Returns true if this call won the claim. */
   markAckSent(businessId: string, requestId: string, sentAt: string): Promise<boolean>;
+
+  // --- Requests: triage, create, schedule ---
+  getRequestById(businessId: string, requestId: string): Promise<CallRequest | null>;
+  /** All requests (any status), newest first, for the full board/queue. */
+  listRequests(businessId: string, limit?: number): Promise<CallRequest[]>;
+  updateRequest(businessId: string, requestId: string, patch: RequestPatch): Promise<CallRequest | null>;
+  createRequest(params: {
+    businessId: string;
+    contactId: string | null;
+    title: string;
+    priority?: string;
+    dueAt?: string | null;
+    description?: string | null;
+    source?: string;
+  }): Promise<CallRequest>;
+  /** Scheduled callbacks whose reminder is due and not yet sent. Global (sweeper). */
+  listDueReminders(now: string, limit?: number): Promise<CallRequest[]>;
+  markReminderSent(businessId: string, requestId: string, sentAt: string): Promise<boolean>;
+
+  /** The business's primary active Twilio number (the "from" for outbound SMS). */
+  getBusinessFromNumber(businessId: string): Promise<string | null>;
+
+  // --- Contacts: create ---
+  createContact(params: {
+    businessId: string;
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  }): Promise<Contact>;
+
+  // --- Activity / notes ---
+  createActivity(params: {
+    businessId: string;
+    contactId?: string | null;
+    requestId?: string | null;
+    kind: string;
+    body: string;
+    createdBy?: string | null;
+  }): Promise<Activity>;
+  listActivityByContact(businessId: string, contactId: string, limit?: number): Promise<Activity[]>;
+  listActivityByRequest(businessId: string, requestId: string, limit?: number): Promise<Activity[]>;
+
+  // --- Tags ---
+  listTags(businessId: string): Promise<Tag[]>;
+  createTag(businessId: string, name: string, color: string): Promise<Tag>;
+  addTagToContact(businessId: string, contactId: string, tagId: string): Promise<void>;
+  removeTagFromContact(businessId: string, contactId: string, tagId: string): Promise<void>;
+  /** Map of contactId -> tagId[] for the given contacts. */
+  listTagsForContacts(businessId: string, contactIds: string[]): Promise<Map<string, string[]>>;
+
+  // --- Tasks ---
+  createTask(params: {
+    businessId: string;
+    title: string;
+    description?: string | null;
+    priority?: string;
+    dueAt?: string | null;
+  }): Promise<Task>;
+  listTasks(businessId: string, limit?: number): Promise<Task[]>;
+  updateTask(
+    businessId: string,
+    taskId: string,
+    patch: Partial<Pick<Task, "title" | "description" | "priority" | "status" | "due_at">>,
+  ): Promise<Task | null>;
 }
 
 /**

@@ -1,5 +1,15 @@
-import { getBackend } from "./backend";
-import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
+import { getBackend, type RequestPatch } from "./backend";
+import type {
+  Activity,
+  Business,
+  BusinessSettings,
+  Call,
+  CallRequest,
+  Contact,
+  Message,
+  Tag,
+  Task,
+} from "./types";
 
 /**
  * Data facade. Delegates to the active backend (mock or Supabase), selected by
@@ -191,4 +201,86 @@ export function markAckSent(
   sentAt: string,
 ): Promise<boolean> {
   return getBackend().markAckSent(businessId, requestId, sentAt);
+}
+
+// --- Requests: triage, create, schedule ---
+export function getRequestById(businessId: string, requestId: string): Promise<CallRequest | null> {
+  return getBackend().getRequestById(businessId, requestId);
+}
+export function listRequests(businessId: string, limit = 500): Promise<CallRequest[]> {
+  return getBackend().listRequests(businessId, limit);
+}
+export function updateRequest(businessId: string, requestId: string, patch: RequestPatch): Promise<CallRequest | null> {
+  return getBackend().updateRequest(businessId, requestId, patch);
+}
+export function createRequest(params: {
+  businessId: string; contactId: string | null; title: string;
+  priority?: string; dueAt?: string | null; description?: string | null; source?: string;
+}): Promise<CallRequest> {
+  return getBackend().createRequest(params);
+}
+export function listDueReminders(now: string, limit = 100): Promise<CallRequest[]> {
+  return getBackend().listDueReminders(now, limit);
+}
+export function markReminderSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+  return getBackend().markReminderSent(businessId, requestId, sentAt);
+}
+
+export function getBusinessFromNumber(businessId: string): Promise<string | null> {
+  return getBackend().getBusinessFromNumber(businessId);
+}
+
+// --- Contacts: create ---
+export function createContact(params: {
+  businessId: string; name?: string | null; phone?: string | null; email?: string | null;
+}): Promise<Contact> {
+  return getBackend().createContact(params);
+}
+
+// --- Activity / notes ---
+export function createActivity(params: {
+  businessId: string; contactId?: string | null; requestId?: string | null;
+  kind: string; body: string; createdBy?: string | null;
+}): Promise<Activity> {
+  return getBackend().createActivity(params);
+}
+export function listActivityByContact(businessId: string, contactId: string, limit = 200): Promise<Activity[]> {
+  return getBackend().listActivityByContact(businessId, contactId, limit);
+}
+export function listActivityByRequest(businessId: string, requestId: string, limit = 200): Promise<Activity[]> {
+  return getBackend().listActivityByRequest(businessId, requestId, limit);
+}
+
+// --- Tags ---
+export function listTags(businessId: string): Promise<Tag[]> {
+  return getBackend().listTags(businessId);
+}
+export function createTag(businessId: string, name: string, color: string): Promise<Tag> {
+  return getBackend().createTag(businessId, name, color);
+}
+export function addTagToContact(businessId: string, contactId: string, tagId: string): Promise<void> {
+  return getBackend().addTagToContact(businessId, contactId, tagId);
+}
+export function removeTagFromContact(businessId: string, contactId: string, tagId: string): Promise<void> {
+  return getBackend().removeTagFromContact(businessId, contactId, tagId);
+}
+export function listTagsForContacts(businessId: string, contactIds: string[]): Promise<Map<string, string[]>> {
+  return getBackend().listTagsForContacts(businessId, contactIds);
+}
+
+// --- Tasks ---
+export function createTask(params: {
+  businessId: string; title: string; description?: string | null; priority?: string; dueAt?: string | null;
+}): Promise<Task> {
+  return getBackend().createTask(params);
+}
+export function listTasks(businessId: string, limit = 200): Promise<Task[]> {
+  return getBackend().listTasks(businessId, limit);
+}
+export function updateTask(
+  businessId: string,
+  taskId: string,
+  patch: Partial<Pick<Task, "title" | "description" | "priority" | "status" | "due_at">>,
+): Promise<Task | null> {
+  return getBackend().updateTask(businessId, taskId, patch);
 }

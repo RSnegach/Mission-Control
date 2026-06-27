@@ -84,6 +84,40 @@ export interface CallRequest {
   source: string | null;
   ack_due_at: string | null; // ISO UTC; when the auto-ack becomes eligible to send
   ack_sent_at: string | null; // ISO UTC; set once the ack is sent (fire-once guard)
+  scheduled_for: string | null; // ISO UTC; a booked callback time
+  reminder_sent_at: string | null; // ISO UTC; set once a scheduled-callback reminder fires
+  created_at: string;
+  updated_at: string;
+}
+
+/** A timeline entry: a manual note or an auto-logged event on a contact/request. */
+export interface Activity {
+  id: string;
+  business_id: string;
+  contact_id: string | null;
+  request_id: string | null;
+  kind: string; // 'note' | 'status_change' | 'message_sent' | 'created' | ...
+  body: string;
+  created_by: string | null; // owner name / "system"
+  created_at: string;
+}
+
+export interface Tag {
+  id: string;
+  business_id: string;
+  name: string;
+  color: string;
+  created_at: string;
+}
+
+export interface Task {
+  id: string;
+  business_id: string;
+  title: string;
+  description: string | null;
+  priority: string; // low | normal | high | urgent
+  status: string; // open | done
+  due_at: string | null;
   created_at: string;
   updated_at: string;
 }

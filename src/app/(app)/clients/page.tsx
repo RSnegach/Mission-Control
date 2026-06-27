@@ -4,10 +4,13 @@ import {
   listCalls,
   listRecentMessages,
   listMissedRequests,
+  listTags,
+  listTagsForContacts,
 } from "@/lib/data";
 import { PageHeader } from "@/components/PageHeader";
 import { Empty } from "@/components/Section";
 import { ClientTable, type ClientView } from "@/components/ClientTable";
+import { AddContactButton } from "@/components/AddContactButton";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +26,15 @@ export default async function ClientsPage() {
   }
 
   // Pull the full interaction history once and fold it per contact.
-  const [contacts, calls, messages, openReqs] = await Promise.all([
+  const [contacts, calls, messages, openReqs, allTags] = await Promise.all([
     listContacts(business.id, 1000),
     listCalls(business.id, 2000),
     listRecentMessages(business.id, 2000),
     listMissedRequests(business.id, 1000),
+    listTags(business.id),
   ]);
+  const tagMap = await listTagsForContacts(business.id, contacts.map((c) => c.id));
+  const tagName = new Map(allTags.map((t) => [t.id, t.name]));
 
   const callCount = new Map<string, number>();
   const lastCallAt = new Map<string, string>();
@@ -66,6 +72,7 @@ export default async function ClientsPage() {
       openRequests: openByContact.get(c.id) ?? 0,
       lastInteractionAt: last,
       firstSeenAt: c.created_at,
+      tags: (tagMap.get(c.id) ?? []).map((tid) => tagName.get(tid) ?? "").filter(Boolean),
     };
   });
 
@@ -74,6 +81,7 @@ export default async function ClientsPage() {
       <PageHeader
         title="Clients"
         subtitle={`${contacts.length} client${contacts.length === 1 ? "" : "s"} ever contacted · search and sort the full history`}
+        actions={<AddContactButton />}
       />
       {contacts.length === 0 ? (
         <Empty text="No clients yet." />

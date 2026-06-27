@@ -2,14 +2,17 @@ import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { toE164 } from "./phone";
-import type { DataBackend } from "./backend";
+import type { DataBackend, RequestPatch } from "./backend";
 import type {
+  Activity,
   Business,
   BusinessSettings,
   Call,
   CallRequest,
   Contact,
   Message,
+  Tag,
+  Task,
 } from "./types";
 
 /**
@@ -176,6 +179,8 @@ function bootstrapSchema(db: SqliteDB): void {
       source text,
       ack_due_at text,
       ack_sent_at text,
+      scheduled_for text,
+      reminder_sent_at text,
       created_at text not null,
       updated_at text not null
     );
@@ -201,6 +206,40 @@ function bootstrapSchema(db: SqliteDB): void {
       media_urls text,
       created_at text not null
     );
+    create table if not exists activity (
+      id text primary key,
+      business_id text not null references businesses(id) on delete cascade,
+      contact_id text references contacts(id) on delete set null,
+      request_id text references requests(id) on delete set null,
+      kind text not null,
+      body text not null default '',
+      created_by text,
+      created_at text not null
+    );
+    create table if not exists tags (
+      id text primary key,
+      business_id text not null references businesses(id) on delete cascade,
+      name text not null,
+      color text not null default '#4f7dff',
+      created_at text not null,
+      unique (business_id, name)
+    );
+    create table if not exists contact_tags (
+      contact_id text not null references contacts(id) on delete cascade,
+      tag_id text not null references tags(id) on delete cascade,
+      primary key (contact_id, tag_id)
+    );
+    create table if not exists tasks (
+      id text primary key,
+      business_id text not null references businesses(id) on delete cascade,
+      title text not null,
+      description text,
+      priority text not null default 'normal',
+      status text not null default 'open',
+      due_at text,
+      created_at text not null,
+      updated_at text not null
+    );
     create index if not exists idx_calls_business_created on calls(business_id, created_at desc);
     create index if not exists idx_calls_twilio_sid on calls(twilio_call_sid);
     create index if not exists idx_calls_from_number on calls(business_id, from_number);
@@ -219,10 +258,18 @@ function bootstrapSchema(db: SqliteDB): void {
   addColumnIfMissing(db, "business_settings", "ack_template", "text");
   addColumnIfMissing(db, "requests", "ack_due_at", "text");
   addColumnIfMissing(db, "requests", "ack_sent_at", "text");
+  addColumnIfMissing(db, "requests", "scheduled_for", "text");
+  addColumnIfMissing(db, "requests", "reminder_sent_at", "text");
 
   db.exec(`
     create index if not exists idx_requests_ack_due
       on requests(business_id, ack_due_at) where ack_due_at is not null and ack_sent_at is null;
+    create index if not exists idx_requests_reminder
+      on requests(scheduled_for) where scheduled_for is not null and reminder_sent_at is null;
+    create index if not exists idx_activity_contact on activity(business_id, contact_id, created_at desc);
+    create index if not exists idx_activity_request on activity(business_id, request_id, created_at desc);
+    create index if not exists idx_contact_tags_contact on contact_tags(contact_id);
+    create index if not exists idx_tasks_business on tasks(business_id, created_at desc);
   `);
 }
 
@@ -319,6 +366,42 @@ function mapRequest(r: Record<string, unknown>): CallRequest {
     source: (r.source as string) ?? null,
     ack_due_at: (r.ack_due_at as string) ?? null,
     ack_sent_at: (r.ack_sent_at as string) ?? null,
+    scheduled_for: (r.scheduled_for as string) ?? null,
+    reminder_sent_at: (r.reminder_sent_at as string) ?? null,
+    created_at: r.created_at as string,
+    updated_at: r.updated_at as string,
+  };
+}
+function mapActivity(r: Record<string, unknown>): Activity {
+  return {
+    id: r.id as string,
+    business_id: r.business_id as string,
+    contact_id: (r.contact_id as string) ?? null,
+    request_id: (r.request_id as string) ?? null,
+    kind: r.kind as string,
+    body: (r.body as string) ?? "",
+    created_by: (r.created_by as string) ?? null,
+    created_at: r.created_at as string,
+  };
+}
+function mapTag(r: Record<string, unknown>): Tag {
+  return {
+    id: r.id as string,
+    business_id: r.business_id as string,
+    name: r.name as string,
+    color: r.color as string,
+    created_at: r.created_at as string,
+  };
+}
+function mapTask(r: Record<string, unknown>): Task {
+  return {
+    id: r.id as string,
+    business_id: r.business_id as string,
+    title: r.title as string,
+    description: (r.description as string) ?? null,
+    priority: r.priority as string,
+    status: r.status as string,
+    due_at: (r.due_at as string) ?? null,
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
   };
@@ -745,6 +828,209 @@ export class SqliteBackend implements DataBackend {
       .run(sentAt, nowIso(), businessId, requestId);
     return Number(res.changes) > 0;
   }
+
+  // --- Requests: triage, create, schedule ---
+  async getRequestById(businessId: string, requestId: string): Promise<CallRequest | null> {
+    const r = get(`select * from requests where business_id = ? and id = ?`, [businessId, requestId]);
+    return r ? mapRequest(r) : null;
+  }
+
+  async listRequests(businessId: string, limit = 500): Promise<CallRequest[]> {
+    return all(`select * from requests where business_id = ? order by created_at desc limit ?`, [businessId, limit]).map(mapRequest);
+  }
+
+  async updateRequest(businessId: string, requestId: string, patch: RequestPatch): Promise<CallRequest | null> {
+    const allowed = new Set(["status", "priority", "due_at", "description", "scheduled_for"]);
+    const cols: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!allowed.has(k)) continue;
+      cols.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (cols.length === 0) return this.getRequestById(businessId, requestId);
+    cols.push("updated_at = ?");
+    vals.push(nowIso(), businessId, requestId);
+    run(`update requests set ${cols.join(", ")} where business_id = ? and id = ?`, vals);
+    return this.getRequestById(businessId, requestId);
+  }
+
+  async createRequest(params: {
+    businessId: string; contactId: string | null; title: string;
+    priority?: string; dueAt?: string | null; description?: string | null; source?: string;
+  }): Promise<CallRequest> {
+    const id = newId("req");
+    const now = nowIso();
+    run(
+      `insert into requests (id, business_id, contact_id, call_id, title, priority, status, due_at, description, source, created_at, updated_at)
+       values (?, ?, ?, null, ?, ?, 'needs_callback', ?, ?, ?, ?, ?)`,
+      [id, params.businessId, params.contactId, params.title, params.priority ?? "normal",
+       params.dueAt ?? null, params.description ?? null, params.source ?? "manual", now, now],
+    );
+    return mapRequest(get(`select * from requests where id = ?`, [id])!);
+  }
+
+  async listDueReminders(now: string, limit = 100): Promise<CallRequest[]> {
+    return all(
+      `select * from requests where scheduled_for is not null and reminder_sent_at is null
+        and scheduled_for <= ? and status not in ('completed','cancelled')
+        order by scheduled_for asc limit ?`,
+      [now, limit],
+    ).map(mapRequest);
+  }
+
+  async markReminderSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+    const res = handle()
+      .prepare(`update requests set reminder_sent_at = ? where business_id = ? and id = ? and reminder_sent_at is null`)
+      .run(sentAt, businessId, requestId);
+    return Number(res.changes) > 0;
+  }
+
+  async getBusinessFromNumber(businessId: string): Promise<string | null> {
+    const r = get(`select phone_number from twilio_numbers where business_id = ? and status = 'active' limit 1`, [businessId]);
+    return r ? (r.phone_number as string) : null;
+  }
+
+  // --- Contacts: create ---
+  async createContact(params: {
+    businessId: string; name?: string | null; phone?: string | null; email?: string | null;
+  }): Promise<Contact> {
+    const normalized = params.phone ? toE164(params.phone) : null;
+    if (normalized) {
+      const existing = get(`select * from contacts where business_id = ? and phone = ?`, [params.businessId, normalized]);
+      if (existing) return mapContact(existing);
+    }
+    const id = newId("con");
+    const now = nowIso();
+    try {
+      run(
+        `insert into contacts (id, business_id, name, phone, email, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)`,
+        [id, params.businessId, params.name?.trim() || null, normalized, params.email?.trim() || null, now, now],
+      );
+    } catch {
+      if (normalized) {
+        const retry = get(`select * from contacts where business_id = ? and phone = ?`, [params.businessId, normalized]);
+        if (retry) return mapContact(retry);
+      }
+      throw new Error("contact insert failed");
+    }
+    return mapContact(get(`select * from contacts where id = ?`, [id])!);
+  }
+
+  // --- Activity / notes ---
+  async createActivity(params: {
+    businessId: string; contactId?: string | null; requestId?: string | null;
+    kind: string; body: string; createdBy?: string | null;
+  }): Promise<Activity> {
+    const id = newId("act");
+    run(
+      `insert into activity (id, business_id, contact_id, request_id, kind, body, created_by, created_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, params.businessId, params.contactId ?? null, params.requestId ?? null, params.kind, params.body, params.createdBy ?? null, nowIso()],
+    );
+    return mapActivity(get(`select * from activity where id = ?`, [id])!);
+  }
+
+  async listActivityByContact(businessId: string, contactId: string, limit = 200): Promise<Activity[]> {
+    return all(`select * from activity where business_id = ? and contact_id = ? order by created_at desc limit ?`, [businessId, contactId, limit]).map(mapActivity);
+  }
+
+  async listActivityByRequest(businessId: string, requestId: string, limit = 200): Promise<Activity[]> {
+    return all(`select * from activity where business_id = ? and request_id = ? order by created_at desc limit ?`, [businessId, requestId, limit]).map(mapActivity);
+  }
+
+  // --- Tags ---
+  async listTags(businessId: string): Promise<Tag[]> {
+    return all(`select * from tags where business_id = ? order by name asc`, [businessId]).map(mapTag);
+  }
+
+  async createTag(businessId: string, name: string, color: string): Promise<Tag> {
+    const existing = get(`select * from tags where business_id = ? and name = ?`, [businessId, name]);
+    if (existing) return mapTag(existing);
+    const id = newId("tag");
+    try {
+      run(`insert into tags (id, business_id, name, color, created_at) values (?, ?, ?, ?, ?)`, [id, businessId, name, color, nowIso()]);
+    } catch {
+      const retry = get(`select * from tags where business_id = ? and name = ?`, [businessId, name]);
+      if (retry) return mapTag(retry);
+      throw new Error("tag insert failed");
+    }
+    return mapTag(get(`select * from tags where id = ?`, [id])!);
+  }
+
+  async addTagToContact(_businessId: string, contactId: string, tagId: string): Promise<void> {
+    try {
+      run(`insert into contact_tags (contact_id, tag_id) values (?, ?)`, [contactId, tagId]);
+    } catch {
+      // already tagged; ignore
+    }
+  }
+
+  async removeTagFromContact(_businessId: string, contactId: string, tagId: string): Promise<void> {
+    run(`delete from contact_tags where contact_id = ? and tag_id = ?`, [contactId, tagId]);
+  }
+
+  async listTagsForContacts(businessId: string, contactIds: string[]): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
+    const unique = [...new Set(contactIds.filter(Boolean))];
+    if (unique.length === 0) return map;
+    const ph = unique.map(() => "?").join(",");
+    const rows = all(
+      `select ct.contact_id, ct.tag_id from contact_tags ct
+         join tags t on t.id = ct.tag_id
+        where t.business_id = ? and ct.contact_id in (${ph})`,
+      [businessId, ...unique],
+    );
+    for (const r of rows) {
+      const cid = r.contact_id as string;
+      const arr = map.get(cid) ?? [];
+      arr.push(r.tag_id as string);
+      map.set(cid, arr);
+    }
+    return map;
+  }
+
+  // --- Tasks ---
+  async createTask(params: {
+    businessId: string; title: string; description?: string | null; priority?: string; dueAt?: string | null;
+  }): Promise<Task> {
+    const id = newId("task");
+    const now = nowIso();
+    run(
+      `insert into tasks (id, business_id, title, description, priority, status, due_at, created_at, updated_at)
+       values (?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
+      [id, params.businessId, params.title, params.description ?? null, params.priority ?? "normal", params.dueAt ?? null, now, now],
+    );
+    return mapTask(get(`select * from tasks where id = ?`, [id])!);
+  }
+
+  async listTasks(businessId: string, limit = 200): Promise<Task[]> {
+    return all(`select * from tasks where business_id = ? order by created_at desc limit ?`, [businessId, limit]).map(mapTask);
+  }
+
+  async updateTask(
+    businessId: string,
+    taskId: string,
+    patch: Partial<Pick<Task, "title" | "description" | "priority" | "status" | "due_at">>,
+  ): Promise<Task | null> {
+    const allowed = new Set(["title", "description", "priority", "status", "due_at"]);
+    const cols: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!allowed.has(k)) continue;
+      cols.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (cols.length === 0) {
+      const cur = get(`select * from tasks where business_id = ? and id = ?`, [businessId, taskId]);
+      return cur ? mapTask(cur) : null;
+    }
+    cols.push("updated_at = ?");
+    vals.push(nowIso(), businessId, taskId);
+    run(`update tasks set ${cols.join(", ")} where business_id = ? and id = ?`, vals);
+    const row = get(`select * from tasks where business_id = ? and id = ?`, [businessId, taskId]);
+    return row ? mapTask(row) : null;
+  }
 }
 
 // --- backfill seed ----------------------------------------------------------
@@ -992,6 +1278,17 @@ function seedIfEmpty(db: SqliteDB): void {
         );
       });
     });
+
+    // Seed a few tags so segmentation is demoable immediately.
+    const insTag = tx.prepare(
+      `insert into tags (id, business_id, name, color, created_at) values (?, ?, ?, ?, ?)`,
+    );
+    insTag.run("tag_vip", businessId, "VIP", "#fbbf24", now);
+    insTag.run("tag_residential", businessId, "Residential", "#34d399", now);
+    insTag.run("tag_commercial", businessId, "Commercial", "#60a5fa", now);
+    const insCt = tx.prepare(`insert into contact_tags (contact_id, tag_id) values (?, ?)`);
+    insCt.run("con_1", "tag_commercial");
+    insCt.run("con_2", "tag_vip");
 
     tx.exec("COMMIT");
   } catch (e) {

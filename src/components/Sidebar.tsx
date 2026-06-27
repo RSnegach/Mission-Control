@@ -10,6 +10,7 @@ const NAV = [
   { href: "/calls", label: "Calls", icon: "☏" },
   { href: "/clients", label: "Clients", icon: "♢" },
   { href: "/requests", label: "Requests", icon: "✓" },
+  { href: "/tasks", label: "Tasks", icon: "☑" },
   { href: "/messages", label: "Messages", icon: "✉" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ];

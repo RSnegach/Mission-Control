@@ -1,6 +1,16 @@
 import { toE164 } from "./phone";
-import type { DataBackend } from "./backend";
-import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
+import type { DataBackend, RequestPatch } from "./backend";
+import type {
+  Activity,
+  Business,
+  BusinessSettings,
+  Call,
+  CallRequest,
+  Contact,
+  Message,
+  Tag,
+  Task,
+} from "./types";
 
 /**
  * In-memory backend for MOCK_MODE. No Supabase, no Twilio, no credentials.
@@ -22,6 +32,10 @@ interface MockStore {
   calls: Call[];
   requests: CallRequest[];
   messages: Message[];
+  activity: Activity[];
+  tags: Tag[];
+  contactTags: { contact_id: string; tag_id: string }[];
+  tasks: Task[];
   events: { id: string; business_id: string | null; call_id: string | null; event_type: string; payload_json: unknown; created_at: string }[];
   seq: number;
 }
@@ -119,6 +133,17 @@ function seed(): MockStore {
     calls,
     requests,
     messages,
+    activity: [],
+    tags: [
+      { id: "tag_vip", business_id: businessId, name: "VIP", color: "#fbbf24", created_at: now },
+      { id: "tag_residential", business_id: businessId, name: "Residential", color: "#34d399", created_at: now },
+      { id: "tag_commercial", business_id: businessId, name: "Commercial", color: "#60a5fa", created_at: now },
+    ],
+    contactTags: [
+      { contact_id: "con_1", tag_id: "tag_commercial" },
+      { contact_id: "con_2", tag_id: "tag_vip" },
+    ],
+    tasks: [],
     events: [],
     seq: 1000,
   };
@@ -192,6 +217,8 @@ function mkReq(p: { id: string; businessId: string; contactId: string | null; ca
     source: "call",
     ack_due_at: null,
     ack_sent_at: null,
+    scheduled_for: null,
+    reminder_sent_at: null,
     created_at: created,
     updated_at: created,
   };
@@ -319,6 +346,8 @@ export class MockBackend implements DataBackend {
       source: "call",
       ack_due_at: null,
       ack_sent_at: null,
+      scheduled_for: null,
+      reminder_sent_at: null,
       created_at: now,
       updated_at: now,
     };
@@ -553,5 +582,211 @@ export class MockBackend implements DataBackend {
     r.ack_sent_at = sentAt;
     r.ack_due_at = null;
     return true;
+  }
+
+  // --- Requests: triage, create, schedule ---
+  async getRequestById(businessId: string, requestId: string): Promise<CallRequest | null> {
+    return store().requests.find((r) => r.business_id === businessId && r.id === requestId) ?? null;
+  }
+
+  async listRequests(businessId: string, limit = 500): Promise<CallRequest[]> {
+    return store()
+      .requests.filter((r) => r.business_id === businessId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  async updateRequest(businessId: string, requestId: string, patch: RequestPatch): Promise<CallRequest | null> {
+    const r = store().requests.find((x) => x.business_id === businessId && x.id === requestId);
+    if (!r) return null;
+    Object.assign(r, patch, { updated_at: new Date().toISOString() });
+    return r;
+  }
+
+  async createRequest(params: {
+    businessId: string; contactId: string | null; title: string;
+    priority?: string; dueAt?: string | null; description?: string | null; source?: string;
+  }): Promise<CallRequest> {
+    const s = store();
+    const now = new Date().toISOString();
+    const req: CallRequest = {
+      id: nextId(s, "req"),
+      business_id: params.businessId,
+      contact_id: params.contactId,
+      call_id: null,
+      title: params.title,
+      category: null,
+      priority: params.priority ?? "normal",
+      status: "needs_callback",
+      due_at: params.dueAt ?? null,
+      description: params.description ?? null,
+      source: params.source ?? "manual",
+      ack_due_at: null,
+      ack_sent_at: null,
+      scheduled_for: null,
+      reminder_sent_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    s.requests.push(req);
+    return req;
+  }
+
+  async listDueReminders(now: string, limit = 100): Promise<CallRequest[]> {
+    return store()
+      .requests.filter(
+        (r) => r.scheduled_for !== null && r.reminder_sent_at === null && r.scheduled_for <= now && r.status !== "completed" && r.status !== "cancelled",
+      )
+      .sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""))
+      .slice(0, limit);
+  }
+
+  async markReminderSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+    const r = store().requests.find((x) => x.business_id === businessId && x.id === requestId);
+    if (!r || r.reminder_sent_at !== null) return false;
+    r.reminder_sent_at = sentAt;
+    return true;
+  }
+
+  async getBusinessFromNumber(businessId: string): Promise<string | null> {
+    const tn = store().twilioNumbers.find((n) => n.business_id === businessId && n.status === "active");
+    return tn?.phone_number ?? null;
+  }
+
+  // --- Contacts: create ---
+  async createContact(params: {
+    businessId: string; name?: string | null; phone?: string | null; email?: string | null;
+  }): Promise<Contact> {
+    const s = store();
+    const normalized = params.phone ? toE164(params.phone) : null;
+    if (normalized) {
+      const existing = s.contacts.find((c) => c.business_id === params.businessId && c.phone === normalized);
+      if (existing) return existing;
+    }
+    const now = new Date().toISOString();
+    const c: Contact = {
+      id: nextId(s, "con"),
+      business_id: params.businessId,
+      name: params.name?.trim() || null,
+      phone: normalized,
+      email: params.email?.trim() || null,
+      created_at: now,
+      updated_at: now,
+    };
+    s.contacts.push(c);
+    return c;
+  }
+
+  // --- Activity / notes ---
+  async createActivity(params: {
+    businessId: string; contactId?: string | null; requestId?: string | null;
+    kind: string; body: string; createdBy?: string | null;
+  }): Promise<Activity> {
+    const s = store();
+    const a: Activity = {
+      id: nextId(s, "act"),
+      business_id: params.businessId,
+      contact_id: params.contactId ?? null,
+      request_id: params.requestId ?? null,
+      kind: params.kind,
+      body: params.body,
+      created_by: params.createdBy ?? null,
+      created_at: new Date().toISOString(),
+    };
+    s.activity.push(a);
+    return a;
+  }
+
+  async listActivityByContact(businessId: string, contactId: string, limit = 200): Promise<Activity[]> {
+    return store()
+      .activity.filter((a) => a.business_id === businessId && a.contact_id === contactId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  async listActivityByRequest(businessId: string, requestId: string, limit = 200): Promise<Activity[]> {
+    return store()
+      .activity.filter((a) => a.business_id === businessId && a.request_id === requestId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  // --- Tags ---
+  async listTags(businessId: string): Promise<Tag[]> {
+    return store()
+      .tags.filter((t) => t.business_id === businessId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async createTag(businessId: string, name: string, color: string): Promise<Tag> {
+    const s = store();
+    const existing = s.tags.find((t) => t.business_id === businessId && t.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing;
+    const tag: Tag = { id: nextId(s, "tag"), business_id: businessId, name, color, created_at: new Date().toISOString() };
+    s.tags.push(tag);
+    return tag;
+  }
+
+  async addTagToContact(businessId: string, contactId: string, tagId: string): Promise<void> {
+    const s = store();
+    if (!s.contactTags.some((ct) => ct.contact_id === contactId && ct.tag_id === tagId)) {
+      s.contactTags.push({ contact_id: contactId, tag_id: tagId });
+    }
+  }
+
+  async removeTagFromContact(businessId: string, contactId: string, tagId: string): Promise<void> {
+    const s = store();
+    s.contactTags = s.contactTags.filter((ct) => !(ct.contact_id === contactId && ct.tag_id === tagId));
+  }
+
+  async listTagsForContacts(businessId: string, contactIds: string[]): Promise<Map<string, string[]>> {
+    const set = new Set(contactIds);
+    const map = new Map<string, string[]>();
+    for (const ct of store().contactTags) {
+      if (!set.has(ct.contact_id)) continue;
+      const arr = map.get(ct.contact_id) ?? [];
+      arr.push(ct.tag_id);
+      map.set(ct.contact_id, arr);
+    }
+    return map;
+  }
+
+  // --- Tasks ---
+  async createTask(params: {
+    businessId: string; title: string; description?: string | null; priority?: string; dueAt?: string | null;
+  }): Promise<Task> {
+    const s = store();
+    const now = new Date().toISOString();
+    const task: Task = {
+      id: nextId(s, "task"),
+      business_id: params.businessId,
+      title: params.title,
+      description: params.description ?? null,
+      priority: params.priority ?? "normal",
+      status: "open",
+      due_at: params.dueAt ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+    s.tasks.push(task);
+    return task;
+  }
+
+  async listTasks(businessId: string, limit = 200): Promise<Task[]> {
+    return store()
+      .tasks.filter((t) => t.business_id === businessId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+
+  async updateTask(
+    businessId: string,
+    taskId: string,
+    patch: Partial<Pick<Task, "title" | "description" | "priority" | "status" | "due_at">>,
+  ): Promise<Task | null> {
+    const t = store().tasks.find((x) => x.business_id === businessId && x.id === taskId);
+    if (!t) return null;
+    Object.assign(t, patch, { updated_at: new Date().toISOString() });
+    return t;
   }
 }

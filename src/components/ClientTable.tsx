@@ -16,6 +16,7 @@ export interface ClientView {
   openRequests: number;
   lastInteractionAt: string | null; // max of last call / last message
   firstSeenAt: string;
+  tags: string[];
 }
 
 type SortKey = "recent" | "name" | "calls" | "messages";
@@ -47,7 +48,7 @@ export function ClientTable({
     const withNames = clients.map((c) => ({ ...c, name: effectiveName(c) }));
     const filtered = q
       ? withNames.filter((c) =>
-          `${c.name ?? ""} ${c.phone ?? ""}`.toLowerCase().includes(q),
+          `${c.name ?? ""} ${c.phone ?? ""} ${c.tags.join(" ")}`.toLowerCase().includes(q),
         )
       : withNames.slice();
 
@@ -143,12 +144,30 @@ export function ClientTable({
             rows.map((c) => (
               <tr key={c.id} style={rowBorder}>
                 <td style={td}>
-                  <EditableName
-                    contactId={c.id}
-                    name={c.name}
-                    href={`/clients/${c.id}`}
-                    onSaved={(n) => setNames((prev) => ({ ...prev, [c.id]: n }))}
-                  />
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <EditableName
+                      contactId={c.id}
+                      name={c.name}
+                      href={`/clients/${c.id}`}
+                      onSaved={(n) => setNames((prev) => ({ ...prev, [c.id]: n }))}
+                    />
+                    {c.tags.map((t) => (
+                      <span
+                        key={t}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          padding: "1px 7px",
+                          borderRadius: 999,
+                          color: "var(--accent)",
+                          background: "color-mix(in srgb, var(--accent) 14%, var(--surface))",
+                          border: "1px solid color-mix(in srgb, var(--accent) 30%, var(--surface))",
+                        }}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </span>
                 </td>
                 <td style={{ ...td, color: colors.muted }}>{c.phone || "—"}</td>
                 <td style={{ ...td, textAlign: "right" }}>{c.callCount}</td>

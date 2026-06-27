@@ -2,16 +2,14 @@ import Link from "next/link";
 import {
   getPrimaryBusiness,
   getSettings,
+  listRequests,
   listMissedRequests,
   getContactsByIds,
 } from "@/lib/data";
 import { slaBuckets, type SlaBucket } from "@/lib/analytics";
-import { formatTime } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { Empty } from "@/components/Section";
-import { Table, Th, Td } from "@/components/Table";
-import { RequestStatusBadge, PriorityBadge } from "@/components/Badge";
-import { colors, rowBorder } from "@/components/ui";
+import { RequestsManager, type RequestRow } from "@/components/RequestsManager";
 
 export const dynamic = "force-dynamic";
 
@@ -42,23 +40,31 @@ export default async function RequestsPage({
     );
   }
 
-  const tz = business.timezone;
-  const [allRequests, settings] = await Promise.all([
-    listMissedRequests(business.id, 200),
-    getSettings(business.id),
-  ]);
+  const settings = await getSettings(business.id);
   const slaMinutes = settings?.callback_sla_minutes ?? 60;
 
-  const now = Date.now();
-  // Order by urgency (most overdue first); filter to a bucket when requested.
-  const { items } = slaBuckets(allRequests, now, slaMinutes);
-  const shown = bucket ? items.filter((i) => i.bucket === bucket) : items;
-  const requests = shown.map((i) => i.request);
+  // Bucket drill-down shows the urgency-filtered OPEN queue; otherwise the full
+  // board across all statuses so the owner can triage and see completed work.
+  let requests;
+  if (bucket) {
+    const open = await listMissedRequests(business.id, 500);
+    const { items } = slaBuckets(open, Date.now(), slaMinutes);
+    requests = items.filter((i) => i.bucket === bucket).map((i) => i.request);
+  } else {
+    requests = await listRequests(business.id, 500);
+  }
 
-  const contactIds = requests
-    .map((r) => r.contact_id)
-    .filter((id): id is string => Boolean(id));
+  const contactIds = requests.map((r) => r.contact_id).filter((id): id is string => Boolean(id));
   const contacts = await getContactsByIds(business.id, contactIds);
+
+  const rows: RequestRow[] = requests.map((r) => {
+    const c = r.contact_id ? contacts.get(r.contact_id) : null;
+    return {
+      request: r,
+      clientId: c?.id ?? null,
+      clientName: c?.name || c?.phone || "Unknown",
+    };
+  });
 
   return (
     <>
@@ -66,8 +72,8 @@ export default async function RequestsPage({
         title="Requests"
         subtitle={
           bucket
-            ? `${requests.length} ${BUCKET_LABEL[bucket]} callback${requests.length === 1 ? "" : "s"}`
-            : `${requests.length} open callback${requests.length === 1 ? "" : "s"}, most urgent first`
+            ? `${rows.length} ${BUCKET_LABEL[bucket]} callback${rows.length === 1 ? "" : "s"}`
+            : "Triage, schedule, and close out callback requests"
         }
         actions={
           bucket ? (
@@ -77,56 +83,7 @@ export default async function RequestsPage({
           ) : undefined
         }
       />
-
-      {requests.length === 0 ? (
-        <Empty text={bucket ? `No ${BUCKET_LABEL[bucket]} callbacks.` : "No open requests."} />
-      ) : (
-        <Table>
-          <thead>
-            <tr>
-              <Th>Title</Th>
-              <Th>Client</Th>
-              <Th>Status</Th>
-              <Th>Priority</Th>
-              <Th>Created</Th>
-              <Th>Due</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((r) => {
-              const contact = r.contact_id ? contacts.get(r.contact_id) : null;
-              const overdue = r.due_at ? new Date(r.due_at).getTime() < now : false;
-              return (
-                <tr key={r.id} style={rowBorder}>
-                  <Td>{r.title}</Td>
-                  <Td>
-                    {contact ? (
-                      <Link href={`/clients/${contact.id}`} style={{ color: "var(--accent)", textDecoration: "none" }}>
-                        {contact.name || contact.phone || "Unknown"}
-                      </Link>
-                    ) : (
-                      <span style={{ color: colors.muted }}>Unknown</span>
-                    )}
-                  </Td>
-                  <Td>
-                    <RequestStatusBadge status={r.status} />
-                  </Td>
-                  <Td>
-                    <PriorityBadge priority={r.priority} />
-                  </Td>
-                  <Td>{formatTime(r.created_at, tz)}</Td>
-                  <Td>
-                    <span style={{ color: overdue ? colors.danger : colors.foreground }}>
-                      {formatTime(r.due_at, tz)}
-                      {overdue ? " · overdue" : ""}
-                    </span>
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
-      )}
+      <RequestsManager rows={rows} timezone={business.timezone} />
     </>
   );
 }

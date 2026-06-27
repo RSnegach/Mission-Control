@@ -1,7 +1,17 @@
 import { getAdminClient } from "./supabase";
 import { toE164 } from "./phone";
-import type { DataBackend } from "./backend";
-import type { Business, BusinessSettings, Call, CallRequest, Contact, Message } from "./types";
+import type { DataBackend, RequestPatch } from "./backend";
+import type {
+  Activity,
+  Business,
+  BusinessSettings,
+  Call,
+  CallRequest,
+  Contact,
+  Message,
+  Tag,
+  Task,
+} from "./types";
 
 /**
  * Real backend: Postgres via supabase-js. Used when MOCK_MODE !== "true".
@@ -564,5 +574,220 @@ export class SupabaseBackend implements DataBackend {
       .select("id");
     if (error) throw error;
     return (data?.length ?? 0) > 0;
+  }
+
+  // --- Requests: triage, create, schedule ---
+  async getRequestById(businessId: string, requestId: string): Promise<CallRequest | null> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("requests").select("*").eq("business_id", businessId).eq("id", requestId).maybeSingle();
+    if (error) throw error;
+    return (data as CallRequest) ?? null;
+  }
+
+  async listRequests(businessId: string, limit = 500): Promise<CallRequest[]> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("requests").select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data ?? []) as CallRequest[];
+  }
+
+  async updateRequest(businessId: string, requestId: string, patch: RequestPatch): Promise<CallRequest | null> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("requests").update(patch).eq("business_id", businessId).eq("id", requestId).select("*").maybeSingle();
+    if (error) throw error;
+    return (data as CallRequest) ?? null;
+  }
+
+  async createRequest(params: {
+    businessId: string; contactId: string | null; title: string;
+    priority?: string; dueAt?: string | null; description?: string | null; source?: string;
+  }): Promise<CallRequest> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("requests").insert({
+      business_id: params.businessId,
+      contact_id: params.contactId,
+      title: params.title,
+      priority: params.priority ?? "normal",
+      status: "needs_callback",
+      due_at: params.dueAt ?? null,
+      description: params.description ?? null,
+      source: params.source ?? "manual",
+    }).select("*").single();
+    if (error) throw error;
+    return data as CallRequest;
+  }
+
+  async listDueReminders(now: string, limit = 100): Promise<CallRequest[]> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("requests").select("*")
+      .not("scheduled_for", "is", null).is("reminder_sent_at", null)
+      .lte("scheduled_for", now)
+      .not("status", "in", "(completed,cancelled)")
+      .order("scheduled_for", { ascending: true }).limit(limit);
+    if (error) throw error;
+    return (data ?? []) as CallRequest[];
+  }
+
+  async markReminderSent(businessId: string, requestId: string, sentAt: string): Promise<boolean> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("requests").update({ reminder_sent_at: sentAt })
+      .eq("business_id", businessId).eq("id", requestId).is("reminder_sent_at", null).select("id");
+    if (error) throw error;
+    return (data?.length ?? 0) > 0;
+  }
+
+  async getBusinessFromNumber(businessId: string): Promise<string | null> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("twilio_numbers").select("phone_number").eq("business_id", businessId).eq("status", "active").limit(1).maybeSingle();
+    if (error) throw error;
+    return (data?.phone_number as string) ?? null;
+  }
+
+  // --- Contacts: create ---
+  async createContact(params: {
+    businessId: string; name?: string | null; phone?: string | null; email?: string | null;
+  }): Promise<Contact> {
+    const db = getAdminClient();
+    const normalized = params.phone ? toE164(params.phone) : null;
+    if (normalized) {
+      const existing = await db.from("contacts").select("*").eq("business_id", params.businessId).eq("phone", normalized).maybeSingle();
+      if (existing.data) return existing.data as Contact;
+    }
+    const { data, error } = await db.from("contacts").insert({
+      business_id: params.businessId,
+      name: params.name?.trim() || null,
+      phone: normalized,
+      email: params.email?.trim() || null,
+    }).select("*").single();
+    if (error) {
+      if (error.code === "23505" && normalized) {
+        const retry = await db.from("contacts").select("*").eq("business_id", params.businessId).eq("phone", normalized).single();
+        if (retry.error) throw retry.error;
+        return retry.data as Contact;
+      }
+      throw error;
+    }
+    return data as Contact;
+  }
+
+  // --- Activity / notes ---
+  async createActivity(params: {
+    businessId: string; contactId?: string | null; requestId?: string | null;
+    kind: string; body: string; createdBy?: string | null;
+  }): Promise<Activity> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("activity").insert({
+      business_id: params.businessId,
+      contact_id: params.contactId ?? null,
+      request_id: params.requestId ?? null,
+      kind: params.kind,
+      body: params.body,
+      created_by: params.createdBy ?? null,
+    }).select("*").single();
+    if (error) throw error;
+    return data as Activity;
+  }
+
+  async listActivityByContact(businessId: string, contactId: string, limit = 200): Promise<Activity[]> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("activity").select("*").eq("business_id", businessId).eq("contact_id", contactId).order("created_at", { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Activity[];
+  }
+
+  async listActivityByRequest(businessId: string, requestId: string, limit = 200): Promise<Activity[]> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("activity").select("*").eq("business_id", businessId).eq("request_id", requestId).order("created_at", { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Activity[];
+  }
+
+  // --- Tags ---
+  async listTags(businessId: string): Promise<Tag[]> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("tags").select("*").eq("business_id", businessId).order("name", { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as Tag[];
+  }
+
+  async createTag(businessId: string, name: string, color: string): Promise<Tag> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("tags").insert({ business_id: businessId, name, color }).select("*").single();
+    if (error) {
+      if (error.code === "23505") {
+        const retry = await db.from("tags").select("*").eq("business_id", businessId).eq("name", name).single();
+        if (retry.error) throw retry.error;
+        return retry.data as Tag;
+      }
+      throw error;
+    }
+    return data as Tag;
+  }
+
+  async addTagToContact(_businessId: string, contactId: string, tagId: string): Promise<void> {
+    const db = getAdminClient();
+    const { error } = await db.from("contact_tags").upsert({ contact_id: contactId, tag_id: tagId });
+    if (error) throw error;
+  }
+
+  async removeTagFromContact(_businessId: string, contactId: string, tagId: string): Promise<void> {
+    const db = getAdminClient();
+    const { error } = await db.from("contact_tags").delete().eq("contact_id", contactId).eq("tag_id", tagId);
+    if (error) throw error;
+  }
+
+  async listTagsForContacts(businessId: string, contactIds: string[]): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
+    const unique = [...new Set(contactIds.filter(Boolean))];
+    if (unique.length === 0) return map;
+    const db = getAdminClient();
+    // Scope by tag.business_id via an inner join filter.
+    const { data, error } = await db
+      .from("contact_tags")
+      .select("contact_id, tag_id, tags!inner(business_id)")
+      .in("contact_id", unique)
+      .eq("tags.business_id", businessId);
+    if (error) throw error;
+    for (const row of (data ?? []) as { contact_id: string; tag_id: string }[]) {
+      const arr = map.get(row.contact_id) ?? [];
+      arr.push(row.tag_id);
+      map.set(row.contact_id, arr);
+    }
+    return map;
+  }
+
+  // --- Tasks ---
+  async createTask(params: {
+    businessId: string; title: string; description?: string | null; priority?: string; dueAt?: string | null;
+  }): Promise<Task> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("tasks").insert({
+      business_id: params.businessId,
+      title: params.title,
+      description: params.description ?? null,
+      priority: params.priority ?? "normal",
+      status: "open",
+      due_at: params.dueAt ?? null,
+    }).select("*").single();
+    if (error) throw error;
+    return data as Task;
+  }
+
+  async listTasks(businessId: string, limit = 200): Promise<Task[]> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("tasks").select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data ?? []) as Task[];
+  }
+
+  async updateTask(
+    businessId: string,
+    taskId: string,
+    patch: Partial<Pick<Task, "title" | "description" | "priority" | "status" | "due_at">>,
+  ): Promise<Task | null> {
+    const db = getAdminClient();
+    const { data, error } = await db.from("tasks").update(patch).eq("business_id", businessId).eq("id", taskId).select("*").maybeSingle();
+    if (error) throw error;
+    return (data as Task) ?? null;
   }
 }

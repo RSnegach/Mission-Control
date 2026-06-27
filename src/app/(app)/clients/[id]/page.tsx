@@ -6,6 +6,9 @@ import {
   listCallsByContact,
   listMessagesByContact,
   listRequestsByContact,
+  listActivityByContact,
+  listTags,
+  listTagsForContacts,
 } from "@/lib/data";
 import { formatTime, formatDuration } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
@@ -13,6 +16,8 @@ import { Section, Empty } from "@/components/Section";
 import { Table, Th, Td } from "@/components/Table";
 import { CallStatusBadge, RequestStatusBadge } from "@/components/Badge";
 import { MessageThread } from "@/components/MessageThread";
+import { NotesPanel } from "@/components/NotesPanel";
+import { TagEditor } from "@/components/TagEditor";
 import { colors, rowBorder, card } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -37,13 +42,17 @@ export default async function ClientProfilePage({
   if (!contact) notFound();
 
   const tz = business.timezone;
-  const [calls, messages, requests] = await Promise.all([
+  const [calls, messages, requests, activity, allTags, tagMap] = await Promise.all([
     listCallsByContact(business.id, id, 100),
     listMessagesByContact(business.id, id, 200),
     listRequestsByContact(business.id, id, 100),
+    listActivityByContact(business.id, id, 200),
+    listTags(business.id),
+    listTagsForContacts(business.id, [id]),
   ]);
 
   const openRequests = requests.filter((r) => r.status === "needs_callback").length;
+  const tagIds = tagMap.get(id) ?? [];
 
   return (
     <>
@@ -62,6 +71,14 @@ export default async function ClientProfilePage({
         <MiniStat label="Messages" value={String(messages.length)} />
         <MiniStat label="Open callbacks" value={String(openRequests)} accent="#eab308" />
       </div>
+
+      <div style={{ marginTop: 16 }}>
+        <TagEditor contactId={id} allTags={allTags} tagIds={tagIds} />
+      </div>
+
+      <Section title="Notes & activity">
+        <NotesPanel contactId={id} activity={activity} timezone={tz} />
+      </Section>
 
       <Section title="Call history">
         {calls.length === 0 ? (
